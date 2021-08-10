@@ -1,0 +1,6 @@
+leelen2sip
+*.d
+*.o
+*.so*
+tmp/
+.gdb_history
