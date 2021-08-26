@@ -9,6 +9,7 @@
 
 #include "private/macro.h"
 #include "in46.h"
+#include "recvfromto.h"
 #include "route.h"
 #include "socket46.h"
 #include "sockaddr46.h"
@@ -16,9 +17,10 @@
 
 
 bool sockaddrpr_match (
-    const struct SockaddrPolicy *policy, const union sockaddr_in46 *addr) {
+    const struct SockaddrPolicy * __restrict policy,
+    const union sockaddr_in46 * __restrict addr) {
   const union in46_addr *host;
-  in_port_t port = sockaddr46_get(&addr->sock, (void **) &host);
+  in_port_t port = sockaddr_get(&addr->sock, &host);
 
   if (policy->prefix != 0 && (
         addr->sa_family != AF_INET ||
@@ -45,7 +47,8 @@ bool sockaddrpr_match (
 
 
 struct SocketPolicyRoute *socketpr_resolve (
-    const struct SocketPolicyRoute *routes, const struct Socket5Tuple *conn) {
+    const struct SocketPolicyRoute * __restrict routes,
+    const struct Socket5Tuple * __restrict conn) {
   for (int i = 0; routes[i].func != NULL; i++) {
     continue_if_not (sockaddrpr_match(&routes[i].src, &conn->src));
     continue_if_not (sockaddrpr_match(&routes[i].dst, &conn->dst));
@@ -55,13 +58,14 @@ struct SocketPolicyRoute *socketpr_resolve (
 }
 
 
-int socketpbr_accept4 (int socket, const struct SocketPBR *pbr, int flags) {
+int socketpbr_accept4 (
+    int sockfd, const struct SocketPBR * __restrict pbr, int flags) {
   struct Socket5Tuple conn;
   conn.src.sa_scope_id = 0;
   conn.dst.sa_scope_id = 0;
 
   socklen_t srclen = sizeof(conn.src);
-  int socket_child = accept4(socket, &conn.src.sock, &srclen, flags);
+  int socket_child = accept4(sockfd, &conn.src.sock, &srclen, flags);
   return_if_fail (socket_child >= 0) pbr->nothing_ret;
 
   if (!pbr->dst_required) {
@@ -71,7 +75,7 @@ int socketpbr_accept4 (int socket, const struct SocketPBR *pbr, int flags) {
       socklen_t dstlen = sizeof(conn.dst);
       getsockname(socket_child, &conn.dst.sock, &dstlen);
     } else {
-      memcpy(&conn.dst, &pbr->dst_addr, sizeof(union sockaddr_in46));
+      conn.dst = pbr->dst_addr;
     }
   }
 
@@ -90,73 +94,36 @@ int socketpbr_accept4 (int socket, const struct SocketPBR *pbr, int flags) {
 }
 
 
-int socketpbr_accept (int socket, const struct SocketPBR *pbr) {
-  return socketpbr_accept4(socket, pbr, 0);
+int socketpbr_accept (int sockfd, const struct SocketPBR * __restrict pbr) {
+  return socketpbr_accept4(sockfd, pbr, 0);
 }
 
 
-static int getsockport (int socket) {
+static int getsockport (int sockfd) {
   struct sockaddr addr;
   socklen_t addrlen = sizeof(addr);
-  return_if_fail (getsockname(socket, &addr, &addrlen) == 0) -1;
-  return sockaddr46_get(&addr, NULL);
+  return_if_fail (getsockname(sockfd, &addr, &addrlen) == 0) -1;
+  return sockaddr_get(&addr, NULL);
 }
 
 
-int socketpbr_recv (int socket, const struct SocketPBR *pbr, int flags) {
+int socketpbr_recv (
+    int sockfd, const struct SocketPBR * __restrict pbr, int flags) {
   struct Socket5Tuple conn;
   conn.src.sa_scope_id = 0;
   memset(&conn.dst, 0, sizeof(conn.dst));
-  union in46_addr spec_dst;
+  struct in_addr recv_dst;
 
-  char buf[pbr->maxlen];
-  int buflen;
+  unsigned char buf[pbr->buflen];
 
-  if (!pbr->dst_required) {
-    socklen_t srclen = sizeof(conn.src);
-    buflen = recvfrom(
-      socket, buf, sizeof(buf), flags, &conn.src.sock, &srclen);
-    return_if_fail (buflen > 0) pbr->nothing_ret;
-  } else {
-    char cmbuf[1024];
-    struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf)};
-    struct msghdr mh = {
-      .msg_name = &conn.src.sock, .msg_namelen = sizeof(conn.src),
-      .msg_iov = &iov, .msg_iovlen = 1,
-      .msg_control = cmbuf, .msg_controllen = sizeof(cmbuf),
-    };
-
-    buflen = recvmsg(socket, &mh, flags);
-    return_if_fail (buflen > 0) pbr->nothing_ret;
-
-    for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&mh); cmsg != NULL;
-         cmsg = CMSG_NXTHDR(&mh, cmsg)) {
-      switch (cmsg->cmsg_level) {
-        case IPPROTO_IP:
-          if (cmsg->cmsg_type == IP_PKTINFO) {
-            struct in_pktinfo *pi = (void *) CMSG_DATA(cmsg);
-            conn.dst.sa_family = AF_INET;
-            memcpy(&conn.dst.v4.sin_addr, &pi->ipi_addr, sizeof(pi->ipi_addr));
-            conn.dst.v4.sin_port = pbr->dst_port != 0 ?
-              pbr->dst_port : getsockport(socket);
-            memcpy(&spec_dst, &pi->ipi_spec_dst, sizeof(pi->ipi_spec_dst));
-            conn.dst.sa_scope_id = pi->ipi_ifindex;
-          }
-          break;
-        case IPPROTO_IPV6:
-          if (cmsg->cmsg_type == IPV6_PKTINFO) {
-            struct in6_pktinfo *pi = (void *) CMSG_DATA(cmsg);
-            conn.dst.sa_family = AF_INET6;
-            memcpy(&conn.dst.v6.sin6_addr, &pi->ipi6_addr,
-                   sizeof(pi->ipi6_addr));
-            conn.dst.v6.sin6_port = pbr->dst_port != 0 ?
-              pbr->dst_port : getsockport(socket);
-            memcpy(&spec_dst, &pi->ipi6_addr, sizeof(pi->ipi6_addr));
-            conn.dst.sa_scope_id = pi->ipi6_ifindex;
-          }
-          break;
-      }
-    }
+  socklen_t srclen = sizeof(conn.src);
+  int buflen = recvfromto(
+    sockfd, buf, pbr->recvlen > 0 ? pbr->recvlen : pbr->buflen, flags,
+    &conn.src.sock, &srclen,
+    pbr->dst_required ? &conn.dst : NULL, pbr->dst_required ? &recv_dst : NULL);
+  return_if_fail (buflen > 0) pbr->nothing_ret;
+  if (pbr->dst_required) {
+    conn.dst.sa_port = pbr->dst_port != 0 ? pbr->dst_port : getsockport(sockfd);
   }
 
   SocketPolicyRouteFunc func;
@@ -165,28 +132,28 @@ int socketpbr_recv (int socket, const struct SocketPBR *pbr, int flags) {
     func = pbr->func;
     context = pbr->context;
   } else {
-    const struct SocketPolicyRoute *route = socketpr_resolve(pbr->routes, &conn);
+    const struct SocketPolicyRoute *route =
+      socketpr_resolve(pbr->routes, &conn);
     return_if_fail (route != NULL) pbr->nothing_ret;
     func = route->func;
     context = route->context;
   }
   return ((SocketPolicyRouteDgramFunc) func)(
-    context, buf, buflen, socket, &conn, &spec_dst);
+    context, buf, buflen, sockfd, &conn, recv_dst);
 }
 
 
-int socketpbr_read (int socket, const struct SocketPBR *pbr) {
-  return socketpbr_recv(socket, pbr, 0);
+int socketpbr_read (int sockfd, const struct SocketPBR * __restrict pbr) {
+  return socketpbr_recv(sockfd, pbr, 0);
 }
 
 
-int socketpbr_set (int socket, struct SocketPBR *pbr, int af) {
-  (void) pbr;
-
-  if (af == 0) {
+int socketpbr_set (
+    int sockfd, const struct SocketPBR * __restrict pbr, int af) {
+  if unlikely (af == 0) {
     struct sockaddr addr;
     socklen_t addrlen = sizeof(addr);
-    return_if_fail (getsockname(socket, &addr, &addrlen) == 0) -1;
+    return_if_fail (getsockname(sockfd, &addr, &addrlen) == 0) -1;
     af = addr.sa_family;
   }
 
@@ -195,9 +162,13 @@ int socketpbr_set (int socket, struct SocketPBR *pbr, int af) {
     return -1;
   }
 
-  int enabled = 1;
-  return setsockopt(
-    socket, af == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
-    af == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO,
-    &enabled, sizeof(enabled));
+  if (pbr->dst_required) {
+    int enabled = 1;
+    return_nonzero (setsockopt(
+      sockfd, af == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
+      af == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO,
+      &enabled, sizeof(enabled)));
+  }
+
+  return 0;
 }

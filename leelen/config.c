@@ -1,9 +1,29 @@
+#include <stddef.h>
+#include <string.h>
+
+#include "family.h"
+#include "discovery/protocol.h"
 #include "config.h"
 
 
-extern inline int LeelenConfig_init_default (struct LeelenConfig *self);
-extern inline void LeelenConfig_destroy (struct LeelenConfig *self);
+int LeelenConfig_init (struct LeelenConfig *self) {
+  memset(&self->addr, 0, sizeof(self->addr));
+  self->desc = NULL;
+  self->number.str[0] = '\0';
+  self->type = LEELEN_DEVICE_BASIC;
 
+  self->discovery = LEELEN_DISCOVERY_PORT;
+  self->voip = LEELEN_VOIP_PORT;
+  self->control = LEELEN_CONRTOL_PORT;
 
-const char * const leelen_protocol_name[3] = {
-  "LEELEN-Discovery", "LEELEN-SIP", "LEELEN-Control"};
+  self->discovery_src = LEELEN_DISCOVERY_PORT;
+  self->voip_src = LEELEN_VOIP_PORT;
+  self->control_src = LEELEN_CONRTOL_PORT;
+
+  self->mtu = LEELEN_MAX_MESSAGE_LENGTH;
+  self->timeout = LEELEN_DISCOVERY_TIMEOUT;
+  self->audio = LEELEN_AUDIO_PORT;
+  self->video = LEELEN_VIDEO_PORT;
+
+  return 0;
+}

@@ -1,6 +1,10 @@
-leelen2sip
 *.d
 *.o
-*.so*
-tmp/
 .gdb_history
+
+leelen2sip
+
+docs/html/
+vendor/
+
+.vscode/

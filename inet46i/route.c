@@ -6,17 +6,17 @@
 
 
 extern inline in_addr_t inet_tomask (int prefix);
-extern inline int inet_isnetwork4 (
+extern inline bool inet_isnetwork4 (
   struct in_addr network, int prefix);
-extern inline int inet_isnetwork6 (
+extern inline bool inet_isnetwork6 (
   struct in6_addr network, int prefix);
-extern inline int inet_innetwork4 (
+extern inline bool inet_innetwork4 (
   struct in_addr addr, struct in_addr network, int prefix);
-extern inline int inet_innetwork6 (
+extern inline bool inet_innetwork6 (
   struct in6_addr addr, struct in6_addr network, int prefix);
 
 
-int inet_isnetwork (int af, const void *network, int prefix) {
+bool inet_isnetwork (int af, const void *network, int prefix) {
   switch (af) {
     case AF_INET:
       return inet_isnetwork4(*(const struct in_addr *) network, prefix);
@@ -24,12 +24,12 @@ int inet_isnetwork (int af, const void *network, int prefix) {
       return inet_isnetwork6(*(const struct in6_addr *) network, prefix);
     default:
       errno = EAFNOSUPPORT;
-      return 0;
+      return false;
   }
 }
 
 
-int inet_innetwork (
+bool inet_innetwork (
     int af, const void *addr, const void *network, int prefix) {
   switch (af) {
     case AF_INET:
@@ -42,6 +42,6 @@ int inet_innetwork (
         prefix);
     default:
       errno = EAFNOSUPPORT;
-      return 0;
+      return false;
   }
 }

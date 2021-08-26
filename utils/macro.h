@@ -5,8 +5,8 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-#define likely(x)       (__builtin_expect(!!(x), 1))
-#define unlikely(x)     (__builtin_expect(!!(x), 0))
+#define likely(x)   (__builtin_expect(!!(x), 1))
+#define unlikely(x) (__builtin_expect(!!(x), 0))
 
 #define should(test) if likely (test) {
 #define otherwise } else
@@ -16,7 +16,7 @@
 #define return_if_not(expr) if (!(expr)) return
 #define return_if_fail(expr) if unlikely (!(expr)) return
 #define return_nonzero(expr) do { \
-  int __res = (expr);  \
+  int __res = (expr); \
   return_if_fail (__res == 0) __res; \
 } while (0)
 
@@ -40,12 +40,10 @@
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
-#define cmp(a,b) ((a) == (b) ? 0 : (a) < (b) ? -1 : 1)
-#define widecmp(a,b) cmp(!!(a), !!(b))
+#define cmp(a, b) ((a) == (b) ? 0 : (a) < (b) ? -1 : 1)
+#define widecmp(a, b) cmp(!!(a), !!(b))
 
 #define arraysize(a) (sizeof(a) / sizeof(a[0]))
-
-#define membersize(type, member) sizeof(((type *) 0)->member)
 
 
 #endif /* UTILS_MACRO_H */

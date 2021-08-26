@@ -8,13 +8,13 @@
 
 int pollserver_recvall (void *context, int socket) {
   (void) context;
-  char buf[1500];
+  unsigned char buf[1500];
   while (recv(socket, buf, sizeof(buf), MSG_DONTWAIT) > 0) { }
   return 0;
 }
 
 
-static int pollserver_call (const struct pollservercb *cb) {
+static int pollserver_call (const struct pollservercb * __restrict cb) {
   return_if_fail (cb->func != (pollserverfunc) NULL) 0;
   int ret;
   switch (cb->type & POLLSERVER_FUNC_ARGS) {
@@ -34,12 +34,9 @@ static int pollserver_call (const struct pollservercb *cb) {
 
 
 int pollserver (
-    const struct pollservercb cbs[], int nfds, int timeout,
-    const struct pollservercb *timeout_cb) {
-  if unlikely (nfds <= 0) {
-    for (nfds = 0; cbs[nfds].func != NULL || cbs[nfds].fd > 0; nfds++) { }
-    return_if_fail (nfds > 0) 255;
-  }
+    const struct pollservercb * __restrict cbs, int nfds, int timeout,
+    const struct pollservercb * __restrict timeout_cb) {
+  return_if_fail (nfds > 0) 255;
 
   struct pollfd pollfds[nfds];
   for (int i = 0; i < nfds; i++) {

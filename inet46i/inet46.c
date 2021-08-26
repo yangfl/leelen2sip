@@ -13,19 +13,20 @@
 #include "inet46.h"
 
 
-extern inline char *ifncpy (char * restrict dst, const char * restrict src);
+extern inline char *ifncpy (char * __restrict dst, const char * __restrict src);
 
 
-int inet_ifton (const char * restrict ifname, struct in_addr * restrict dst) {
+int inet_ifton (
+    const char * __restrict ifname, struct in_addr * __restrict dst) {
   int fd = socket(AF_INET, SOCK_DGRAM, 0);
-  return_if_fail (fd < 0) 0;
+  return_if_fail (fd < 0) AF_UNSPEC;
 
   struct ifreq ifr = {.ifr_addr = {.sa_family = AF_INET}};
   ifncpy(ifr.ifr_name, ifname);
 
   int ret = ioctl(fd, SIOCGIFADDR, &ifr);
   close(fd);
-  return_if_fail (ret == 0) 0;
+  return_if_fail (ret == 0) AF_UNSPEC;
 
   dst->s_addr = ((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr.s_addr;
   return AF_INET;
@@ -33,8 +34,8 @@ int inet_ifton (const char * restrict ifname, struct in_addr * restrict dst) {
 
 
 int inet_atonz_p (
-    const char *src, struct in_addr *dst4, struct in6_addr *dst6,
-    uint32_t *scope_id) {
+    const char * __restrict src, struct in_addr *dst4, struct in6_addr *dst6,
+    uint32_t * __restrict scope_id) {
   if (src[0] == '[') {
     src++;
   }
@@ -52,7 +53,7 @@ int inet_atonz_p (
     if (dst6 != NULL) {
       return_if (inet_pton(AF_INET6, src, dst6) == 1) AF_INET6;
     }
-    return 0;
+    return AF_UNSPEC;
   }
 
   // do copy
@@ -88,13 +89,13 @@ int inet_atonz_p (
   if (dst6 != NULL) {
     return_if (inet_pton(AF_INET6, src_, dst6) == 1) AF_INET6;
   }
-  return 0;
+  return AF_UNSPEC;
 }
 
 
 int inet_ptonz (
-    int af, const char * restrict src, void * restrict dst,
-    uint32_t *scope_id) {
+    int af, const char * __restrict src, void * __restrict dst,
+    uint32_t * __restrict scope_id) {
   switch (af) {
     case AF_INET:
       return_if (inet_atonz_p(src, dst, NULL, scope_id) != 0) 1;
@@ -109,18 +110,18 @@ int inet_ptonz (
 }
 
 
-int inet_aton46 (const char * restrict src, void * restrict dst) {
+int inet_aton46 (const char * __restrict src, void * __restrict dst) {
   if (inet_pton(AF_INET, src, dst) == 1) {
     return AF_INET;
   }
   if (inet_pton(AF_INET6, src, dst) == 1) {
     return AF_INET6;
   }
-  return 0;
+  return AF_UNSPEC;
 }
 
 
-int inet_aton46i (const char * restrict src, void * restrict dst) {
+int inet_aton46i (const char * __restrict src, void * __restrict dst) {
   unsigned int ifindex = if_nametoindex(src);
   if (ifindex != 0) {
     *(unsigned int *) dst = ifindex;
@@ -130,7 +131,7 @@ int inet_aton46i (const char * restrict src, void * restrict dst) {
 }
 
 
-int inet_aton64 (const char * restrict src, void * restrict dst) {
+int inet_aton64 (const char * __restrict src, void * __restrict dst) {
   if (inet_pton(AF_INET, src, &((struct in64_addr *) dst)->addr) == 1) {
     IN6_SET_ADDR_V4MAPPED(dst);
     return AF_INET;
@@ -138,11 +139,12 @@ int inet_aton64 (const char * restrict src, void * restrict dst) {
   if (inet_pton(AF_INET6, src, dst) == 1) {
     return AF_INET6;
   }
-  return 0;
+  return AF_UNSPEC;
 }
 
 
-int inet_atonz64 (const char * restrict src, struct in64_addr * restrict dst) {
+int inet_atonz64 (
+    const char * __restrict src, struct in64_addr * __restrict dst) {
   int domain = inet_atonz_p(src, &dst->addr, &dst->addr6, &dst->scope_id);
   if (domain == AF_INET) {
     IN6_SET_ADDR_V4MAPPED(dst);
@@ -151,7 +153,8 @@ int inet_atonz64 (const char * restrict src, struct in64_addr * restrict dst) {
 }
 
 
-int inet_atonz64i (const char * restrict src, struct in64_addr * restrict dst) {
+int inet_atonz64i (
+    const char * __restrict src, struct in64_addr * __restrict dst) {
   dst->scope_id = if_nametoindex(src);
   if (dst->scope_id != 0) {
     memset(&dst->addr6, 0, sizeof(struct in6_addr));

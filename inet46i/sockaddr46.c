@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -9,21 +10,25 @@
 #include "sockaddr46.h"
 
 
-extern inline void *sockaddr_addr (const struct sockaddr *addr);
-extern inline struct sockaddr *sockaddr_to6 (struct sockaddr *addr);
-extern inline struct sockaddr *sockaddr_to4 (struct sockaddr *addr);
-extern inline in_port_t sockaddr46_get (
-  const struct sockaddr * restrict addr,
-  void ** restrict host);
+extern inline void *sockaddr_addr (const struct sockaddr * __restrict addr);
+extern inline in_port_t sockaddr_get (
+  const struct sockaddr * __restrict addr, void * __restrict host);
+extern inline in_port_t sockaddr_get64 (
+  const struct sockaddr * __restrict addr, struct in64_addr * __restrict host);
+extern inline bool sockaddr_same (
+  const struct sockaddr *a, const struct sockaddr *b);
+extern inline struct sockaddr *sockaddr_to6 (struct sockaddr * __restrict addr);
+extern inline struct sockaddr *sockaddr_to4 (struct sockaddr * __restrict addr);
 extern inline struct sockaddr *sockaddr46_set (
-  union sockaddr_in46 * restrict addr, int af,
-  const void * restrict host, in_port_t port);
-extern inline in_port_t sockaddr_to64 (
-  const struct sockaddr *addr, struct in64_addr *host);
+  union sockaddr_in46 * __restrict addr, int af, const void * __restrict host,
+  in_port_t port);
 
 
 int sockaddrz_toa (
-    const struct sockaddr *addr, char *str, size_t len, int ifindex) {
+    const struct sockaddr * __restrict addr,
+    char * __restrict str, size_t len, int ifindex) {
+  return_if_fail (len > 0) 0;
+
   if (addr->sa_family == AF_INET6) {
     str[0] = '[';
     inet_ntop(
@@ -56,18 +61,24 @@ int sockaddrz_toa (
 }
 
 
-int sockaddr_toa (const struct sockaddr *addr, char *str, size_t len) {
-  return sockaddrz_toa(addr, str, len,
-                       ((const struct sockaddr_in6 *) addr)->sin6_scope_id);
+int sockaddr_toa (
+    const struct sockaddr * __restrict addr,
+    char * __restrict str, size_t len) {
+  return sockaddrz_toa(
+    addr, str, len, addr->sa_family == AF_INET6 ?
+      ((const struct sockaddr_in6 *) addr)->sin6_scope_id : 0);
 }
 
 
-int sockaddr46_toa (const union sockaddr_in46 *addr, char *str, size_t len) {
+int sockaddr46_toa (
+    const union sockaddr_in46 * __restrict addr,
+    char * __restrict str, size_t len) {
   return sockaddrz_toa(&addr->sock, str, len, addr->sa_scope_id);
 }
 
 
-int sockaddr46_aton (const char * restrict src, struct sockaddr *dst) {
+int sockaddr46_aton (
+    const char * __restrict src, union sockaddr_in46 * __restrict dst) {
   struct in64_addr host;
   int domain = inet_atonz64i(src, &host);
   return_if_fail (domain != AF_UNSPEC) AF_UNSPEC;
@@ -81,24 +92,12 @@ int sockaddr46_aton (const char * restrict src, struct sockaddr *dst) {
       memset(&addr->v6.sin6_addr, 0, sizeof(struct in6_addr));
       break;
     case AF_INET:
-      memcpy(&addr->v4.sin_addr, &host.addr, sizeof(struct in_addr));
+      addr->v4.sin_addr = host.addr;
       break;
     case AF_INET6:
-      memcpy(&addr->v6.sin6_addr, &host.addr6, sizeof(struct in6_addr));
+      addr->v6.sin6_addr = host.addr6;
       addr->v6.sin6_flowinfo = 0;
       break;
   }
   return domain;
-}
-
-
-int sockaddr46_same (const struct sockaddr *a, const struct sockaddr *b) {
-  void *aaddr;
-  void *baddr;
-  in_port_t aport = sockaddr46_get(a, &aaddr);
-  in_port_t bport = sockaddr46_get(b, &baddr);
-  return_nonzero (cmp(aport, bport));
-  return a->sa_family == AF_INET ?
-    memcmp(aaddr, baddr, sizeof(struct in_addr)) :
-    memcmp(aaddr, baddr, sizeof(struct in6_addr));
 }

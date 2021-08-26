@@ -53,7 +53,7 @@ int argtoifaceip (const char s[], struct in46i_addr *addr) {
 
 
 int argtosockaddr (const char s[], union sockaddr_in46 *addr) {
-  int domain = sockaddr46_aton(s, &addr->sock);
+  int domain = sockaddr46_aton(s, addr);
   should (domain != AF_UNSPEC) otherwise {
     fprintf(
       stderr, "error: cannot parse '%s' as an interface or address\n", s);
