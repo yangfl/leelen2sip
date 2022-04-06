@@ -31,16 +31,6 @@ inline char *ifncpy (char * __restrict dst, const char * __restrict src) {
   return dst;
 }
 
-__attribute__((nonnull, access(read_only, 1), access(write_only, 2)))
-/**
- * @brief Get IPv4 address of the interface.
- *
- * @param ifname Interface name.
- * @param[out] dst IPv4 address.
- * @return @c AF_INET on success, @c AF_UNSPEC on error.
- */
-int inet_ifton (
-  const char * __restrict ifname, struct in_addr * __restrict dst);
 __attribute__((nonnull(1), access(read_only, 1), access(write_only, 2),
                access(write_only, 3), access(write_only, 4)))
 /**

@@ -16,23 +16,6 @@
 extern inline char *ifncpy (char * __restrict dst, const char * __restrict src);
 
 
-int inet_ifton (
-    const char * __restrict ifname, struct in_addr * __restrict dst) {
-  int fd = socket(AF_INET, SOCK_DGRAM, 0);
-  return_if_fail (fd < 0) AF_UNSPEC;
-
-  struct ifreq ifr = {.ifr_addr = {.sa_family = AF_INET}};
-  ifncpy(ifr.ifr_name, ifname);
-
-  int ret = ioctl(fd, SIOCGIFADDR, &ifr);
-  close(fd);
-  return_if_fail (ret == 0) AF_UNSPEC;
-
-  dst->s_addr = ((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr.s_addr;
-  return AF_INET;
-}
-
-
 int inet_atonz_p (
     const char * __restrict src, struct in_addr *dst4, struct in6_addr *dst6,
     uint32_t * __restrict scope_id) {

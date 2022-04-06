@@ -19,7 +19,7 @@ struct Forwarder {
 
   /** @publicsection */
   /// length of read/write buffer (maximum transmission unit for UDP packet)
-  int mtu;
+  unsigned short mtu;
   /// socket 1
   int socket1;
   /// socket 2
@@ -70,7 +70,7 @@ __attribute__((nonnull, access(write_only, 1)))
  * @param mtu Length of read/write buffer.
  * @return 0.
  */
-static inline int Forwarder_init (struct Forwarder *self, int mtu) {
+static inline int Forwarder_init (struct Forwarder *self, unsigned short mtu) {
   self->state = SINGLE_FLAG_INIT;
   self->mtu = mtu;
   self->socket1 = -1;

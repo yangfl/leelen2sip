@@ -90,8 +90,11 @@ struct LeelenConfig {
 
   /// maximum transmission unit for UDP packet
   unsigned short mtu;
-  /// timeout for device discovery, in milliseconds
-  int timeout;
+
+  /// VoIP ACK timeout, in milliseconds
+  unsigned int voip_timeout;
+  /// dialog duration, in seconds
+  unsigned int duration;
 
   /// port for VoIP audio stream
   in_port_t audio;

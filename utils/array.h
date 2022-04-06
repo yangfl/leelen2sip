@@ -131,6 +131,13 @@ inline void ptrvsteal (void * __restrict parr, int * __restrict plen, int i) {
   }
 }
 
+__attribute__((nonnull))
+inline void ptrvtrysteal (
+    void * __restrict parr, int * __restrict plen, int i) {
+  return_if_fail (i < *plen);
+  ptrvsteal(parr, plen, i);
+}
+
 __attribute__((nonnull, access(read_only, 3)))
 inline void ptrvtake (void *parr, int * __restrict plen, const void *ele) {
   ptrvsteal(parr, plen, ptrvfind(*(void ***) parr, *plen, ele));

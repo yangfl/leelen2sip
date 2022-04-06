@@ -14,8 +14,7 @@ extern "C" {
 // #include "../number.h"
 struct LeelenNumber;
 #include "advertiser.h"
-// #include "host.h"
-struct LeelenHost;
+#include "host.h"
 
 
 /**
@@ -30,8 +29,6 @@ struct LeelenDiscovery {
   single_flag state;
 
   /** @publicsection */
-  /// address family of LeelenDiscovery::spec_sockfd
-  unsigned char spec_af;
   /// socket for sending discovery packets
   int spec_sockfd;
   /// IPv4 socket
@@ -39,13 +36,20 @@ struct LeelenDiscovery {
   /// IPv6 socket
   int sockfd6;
 
+  /// device discovery timeout, in milliseconds
+  unsigned int timeout;
+  /// port for device discovery
+  in_port_t port;
+  /// address for outgoing data, with sockaddr_in46::sa_port set
+  union sockaddr_in46 addr;
+
   /** @privatesection */
   /// mutex for peer discovery
   mtx_t mutex;
   /// condition when advertisement is received
   cnd_t cond;
   /// discovery result
-  struct LeelenHost *host;
+  struct LeelenHost host;
   /// return value of LeelenHost_init()
   int initres;
 };
@@ -106,6 +110,16 @@ __attribute__((nonnull))
  * @return 0 on success, -1 on error and @c errno is set appropriately.
  */
 int LeelenDiscovery_connect (struct LeelenDiscovery *self);
+
+__attribute__((nonnull))
+/**
+ * @memberof LeelenDiscovery
+ * @brief Sync config from @p self->config.
+ *
+ * @param self Discovery daemon.
+ * @return 0 on success, error otherwise.
+ */
+int LeelenDiscovery_sync (struct LeelenDiscovery *self);
 
 __attribute__((nonnull))
 /**

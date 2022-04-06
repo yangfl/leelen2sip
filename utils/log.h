@@ -191,23 +191,40 @@ struct Logger {
   struct LoggerFormattedStream formatted[LOG_LEVEL_COUNT];
 };
 
+/// Select Graphic Rendition parameter for #LOG_LEVEL_EMERG
+#define LOGGER_SGR_EMERG    "5;1;" COLOR_CODE(COLOR_BACKGROUND_RED) ";" COLOR_CODE(COLOR_FOREGROUND_BRIGHT_WHITE)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_ALERT
+#define LOGGER_SGR_ALERT    "1;" COLOR_CODE(COLOR_BACKGROUND_RED) ";" COLOR_CODE(COLOR_FOREGROUND_BRIGHT_WHITE)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_CRITICAL
+#define LOGGER_SGR_CRITICAL "1;" COLOR_CODE(COLOR_FOREGROUND_RED)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_ERROR
+#define LOGGER_SGR_ERROR    "1;" COLOR_CODE(COLOR_FOREGROUND_RED)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_WARNING
+#define LOGGER_SGR_WARNING  "1;" COLOR_CODE(COLOR_FOREGROUND_YELLOW)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_NOTICE
+#define LOGGER_SGR_NOTICE   "1;" COLOR_CODE(COLOR_FOREGROUND_GREEN)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_INFO
+#define LOGGER_SGR_INFO     COLOR_CODE(COLOR_FOREGROUND_BLUE)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_DEBUG
+#define LOGGER_SGR_DEBUG    COLOR_CODE(COLOR_FOREGROUND_MAGENTA)
+/// Select Graphic Rendition parameter for #LOG_LEVEL_VERBOSE
+#define LOGGER_SGR_VERBOSE  COLOR_CODE(COLOR_FOREGROUND_CYAN)
+
 /// Logger initializer with proper defaults
 #define LOGGER_INIT \
   .level = LOG_LEVEL_NOTICE, \
   .fatal = LOG_LEVEL_CRITICAL, \
   .backtrace = true, \
   .formatted = { \
-    {&logger_stream_stderr, \
-     "5;1;" COLOR_CODE(COLOR_BACKGROUND_RED) ";" COLOR_CODE(COLOR_FOREGROUND_BRIGHT_WHITE)}, \
-    {&logger_stream_stderr, \
-     "1;" COLOR_CODE(COLOR_BACKGROUND_RED) ";" COLOR_CODE(COLOR_FOREGROUND_BRIGHT_WHITE)}, \
-    {&logger_stream_stderr, "1;" COLOR_CODE(COLOR_FOREGROUND_RED)}, \
-    {&logger_stream_stdout, "1;" COLOR_CODE(COLOR_FOREGROUND_RED)}, \
-    {&logger_stream_stdout, "1;" COLOR_CODE(COLOR_FOREGROUND_YELLOW)}, \
-    {&logger_stream_stdout, "1;" COLOR_CODE(COLOR_FOREGROUND_GREEN)}, \
-    {&logger_stream_stdout, COLOR_CODE(COLOR_FOREGROUND_BLUE)}, \
-    {&logger_stream_stdout, COLOR_CODE(COLOR_FOREGROUND_MAGENTA)}, \
-    {&logger_stream_stdout, COLOR_CODE(COLOR_FOREGROUND_CYAN)}, \
+    {&logger_stream_stderr, LOGGER_SGR_EMERG}, \
+    {&logger_stream_stderr, LOGGER_SGR_ALERT}, \
+    {&logger_stream_stderr, LOGGER_SGR_CRITICAL}, \
+    {&logger_stream_stdout, LOGGER_SGR_ERROR}, \
+    {&logger_stream_stdout, LOGGER_SGR_WARNING}, \
+    {&logger_stream_stdout, LOGGER_SGR_NOTICE}, \
+    {&logger_stream_stdout, LOGGER_SGR_INFO}, \
+    {&logger_stream_stdout, LOGGER_SGR_DEBUG}, \
+    {&logger_stream_stdout, LOGGER_SGR_VERBOSE}, \
   }, \
 
 #ifndef __LOG_BUILD
@@ -880,8 +897,7 @@ int Logger_log_func (
     int res = LoggerEvent_init_func( \
       &__logger_event, self, level, file, line, func); \
     LOGGER_EVENT_GUARD_BEGIN(&__logger_event); \
-    res += LoggerEvent_log_func(&__logger_event, __VA_ARGS__); \
-    LOGGER_EVENT_GUARD_END(&__logger_event); \
+    res += dprintf(__logger_event.stream->fd, __VA_ARGS__); \
     res += LoggerEvent_destroy_inline(&__logger_event); \
     LOGGER_EVENT_GUARD_END(&__logger_event); \
     res; \
@@ -957,7 +973,7 @@ int Logger_log_perror_func (
     int res = LoggerEvent_init_func( \
       &__logger_event, self, level, file, line, func); \
     LOGGER_EVENT_GUARD_BEGIN(&__logger_event); \
-    res += LoggerEvent_log_func(&__logger_event, __VA_ARGS__); \
+    res += dprintf(__logger_event.stream->fd, __VA_ARGS__); \
     res += LoggerEvent_perror_func(&__logger_event, errnum, true); \
     LOGGER_EVENT_GUARD_END(&__logger_event); \
     res += LoggerEvent_destroy_inline(&__logger_event); \

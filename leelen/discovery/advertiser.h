@@ -10,8 +10,7 @@ extern "C" {
 #include <string.h>
 #include <netinet/in.h>
 
-// #include "../config.h"
-struct LeelenConfig;
+#include "../config.h"
 
 
 /**
@@ -21,12 +20,17 @@ struct LeelenConfig;
 struct LeelenAdvertiser {
   /// device config
   const struct LeelenConfig *config;
+
   /// phone number regex for solicitation matching
   regex_t number_regex;
   /// @c true if LeelenAdvertiser::number_regex is set
   bool number_regex_set;
+
   /// IP address of the device to be reported
   char report_addr[INET6_ADDRSTRLEN];
+
+  /// maximum transmission unit for UDP packet
+  unsigned short mtu;
 };
 
 __attribute__((nonnull, access(read_only, 1), access(read_only, 2)))
@@ -83,19 +87,19 @@ __attribute__((nonnull, access(read_only, 3)))
  * @param[in,out] self Advertiser.
  * @param af The address family.
  * @param addr The IP address.
- * @return 0.
+ * @return 0 on success, 255 if address family is not supported.
  */
 int LeelenAdvertiser_set_report_addr (
   struct LeelenAdvertiser *self, int af, const void *addr);
 __attribute__((nonnull))
 /**
  * @memberof LeelenAdvertiser
- * @brief Set @p self->report_addr from @p self->conf->addr.
+ * @brief Sync properties from @p self->config.
  *
  * @param[in,out] self Advertiser.
- * @return 0.
+ * @return 0 on success, error otherwise.
  */
-int LeelenAdvertiser_fix_report_addr (struct LeelenAdvertiser *self);
+int LeelenAdvertiser_sync (struct LeelenAdvertiser *self);
 
 __attribute__((nonnull))
 /**
@@ -123,7 +127,7 @@ static inline int LeelenAdvertiser_init (
     struct LeelenAdvertiser *self, const struct LeelenConfig *config) {
   self->config = config;
   self->number_regex_set = false;
-  self->report_addr[0] = '\0';
+  LeelenAdvertiser_sync(self);
   return 0;
 }
 

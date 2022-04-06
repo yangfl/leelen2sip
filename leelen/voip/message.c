@@ -85,13 +85,19 @@ int LeelenMessage_init_reply (
 int LeelenMessage_init (
     struct LeelenMessage *self, char *msg,
     bool no_audio_formats, bool no_video_formats) {
-  self->code = le32toh(LEELEN_MESSAGE_CODE(msg));
   self->id = LEELEN_MESSAGE_ID(msg);
+  self->code = le32toh(LEELEN_MESSAGE_CODE(msg));
+  self->from.str[0] = '\0';
+  self->from_type = 0;
+  self->to.str[0] = '\0';
+  self->audio_port = 0;
+  self->video_port = 0;
 
   self->audio_formats = NULL;
   self->video_formats = NULL;
   int n_audio_format = 0;
   int n_video_format = 0;
+
   for (char *saved, *line =
         strtok_r(msg + LEELEN_MESSAGE_HEADER_SIZE, "\n", &saved); line != NULL;
        line = strtok_r(NULL, "\n", &saved)) {

@@ -21,8 +21,8 @@ struct LeelenConfig;
 struct LeelenMessage {
   /// dialog ID, see LeelenDialog::id
   leelen_id_t id;
-  /// message code, in host byte order, see LeelenCode
-  leelen_code_t code;
+  /// message code, in host byte order
+  enum LeelenCode code;
 
   /// phone number of source device
   struct LeelenNumber from;
@@ -31,14 +31,14 @@ struct LeelenMessage {
   /// phone number of destination device
   struct LeelenNumber to;
 
-  /// audio descriptor, if any
-  char **audio_formats;
-  /// video descriptor, if any
-  char **video_formats;
   /// audio port, if any
   in_port_t audio_port;
   /// video port, if any
   in_port_t video_port;
+  /// audio descriptor, if any
+  char **audio_formats;
+  /// video descriptor, if any
+  char **video_formats;
 };
 
 __attribute__((nonnull, access(read_only, 1), access(write_only, 2, 3)))

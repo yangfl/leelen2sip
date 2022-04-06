@@ -24,6 +24,8 @@ extern inline int ptrvcreate (
   void * __restrict parr, int * __restrict plen, size_t str);
 extern inline void ptrvsteal (
   void * __restrict parr, int * __restrict plen, int i);
+extern inline void ptrvtrysteal (
+  void * __restrict parr, int * __restrict plen, int i);
 extern inline void ptrvtake (
   void *parr, int * __restrict plen, const void *ele);
 extern inline void strvfree (void *arr);

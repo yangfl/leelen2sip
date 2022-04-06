@@ -3,6 +3,7 @@
 
 #include "family.h"
 #include "discovery/protocol.h"
+#include "voip/protocol.h"
 #include "config.h"
 
 
@@ -21,7 +22,10 @@ int LeelenConfig_init (struct LeelenConfig *self) {
   self->control_src = LEELEN_CONRTOL_PORT;
 
   self->mtu = LEELEN_MAX_MESSAGE_LENGTH;
-  self->timeout = LEELEN_DISCOVERY_TIMEOUT;
+
+  self->voip_timeout = LEELEN_VOIP_TIMEOUT;
+  self->duration = LEELEN_VOIP_DURATION;
+
   self->audio = LEELEN_AUDIO_PORT;
   self->video = LEELEN_VIDEO_PORT;
 

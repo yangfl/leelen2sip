@@ -30,15 +30,13 @@ __attribute__((nonnull))
 int osip_message_set_status_code_and_reason_phrase (
   osip_message_t *sip, int status);
 
-__attribute__((
-  nonnull(1, 2), warn_unused_result, access(write_only, 1),
-  access(read_only, 2), access(read_only, 4)))
+__attribute__((nonnull(1, 2), access(write_only, 1), access(read_only, 2),
+               access(read_only, 4)))
 int osip_message_response (
   osip_message_t **response, const osip_message_t *request, int status_code,
   const char *ua);
-__attribute__((
-  nonnull(1, 2, 3), warn_unused_result, access(write_only, 1),
-  access(read_only, 3), access(read_only, 4)))
+__attribute__((nonnull(1, 2, 3), access(write_only, 1), access(read_only, 3),
+               access(read_only, 4)))
 int osip_message_request (
   osip_message_t **request, osip_dialog_t *dialog, const char *method,
   const char *ua);
@@ -53,20 +51,20 @@ __attribute__((nonnull))
 static inline int osip_transaction_send_sipmessage (
     osip_transaction_t *transaction, osip_message_t *sip, bool now) {
   osip_event_t *event = osip_new_outgoing_sipmessage(sip);
-  if (event == NULL) {
+  if (__builtin_expect(event == NULL, 0)) {
     return OSIP_UNDEFINED_ERROR;
   }
 
-  // BUG of osip: osip_transaction_add_event may fail when OOM, but the return
-  // value is missing
-  if (!now) {
+  if (now) {
+    event->transactionid = transaction->transactionid;
+    // osip_transaction_execute returns 1 if event got consumed
+    osip_transaction_execute(transaction, event);
+    return OSIP_SUCCESS;
+  } else {
+    // BUG of osip: osip_transaction_add_event may fail when OOM, but the return
+    // value is missing
     return osip_transaction_add_event(transaction, event);
   }
-
-  event->transactionid = transaction->transactionid;
-  // osip_transaction_execute returns 1 if event got consumed
-  osip_transaction_execute(transaction, event);
-  return OSIP_SUCCESS;
 }
 
 __attribute__((warn_unused_result, nonnull(1), access(read_only, 3)))

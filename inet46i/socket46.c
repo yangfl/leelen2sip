@@ -12,7 +12,7 @@
 
 int openaddrz (
     const struct sockaddr * __restrict addr, int type, int flags,
-    int scope_id) {
+    unsigned int scope_id) {
   int fd = socket(addr->sa_family, type, 0);
   return_if_fail (fd >= 0) -1;
 

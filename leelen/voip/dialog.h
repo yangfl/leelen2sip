@@ -5,7 +5,6 @@
 extern "C" {
 #endif
 
-#include <stdint.h>
 #include <threads.h>
 #include <time.h>
 #include <netinet/in.h>
@@ -45,18 +44,23 @@ struct LeelenDialog {
   leelen_id_t id;
 
   /// phone number of this device
-  struct LeelenNumber from;
+  struct LeelenNumber our;
   /// device type of this device
-  unsigned char from_type;
+  unsigned char our_type;
   /**
    * @brief phone number of peer device
    *
    * This field can actually be different than the real peer phone number, since
    * seems LEELEN does not check the phone number in VoIP messages.
    */
-  struct LeelenNumber to;
+  struct LeelenNumber their;
   /// device type of peer device
-  unsigned char to_type;
+  unsigned char their_type;
+
+  /// ACK timeout, in milliseconds
+  unsigned int timeout;
+  /// dialog duration, in seconds
+  unsigned int duration;
 
   /// address of this device, for external use
   union sockaddr_in46 ours;
@@ -80,6 +84,8 @@ struct LeelenDialog {
   unsigned char state;
   /// last sent time
   struct timespec last_sent;
+  /// last activity time
+  time_t last_activity;
 
   /** @publicsection */
 
@@ -95,7 +101,20 @@ __attribute__((nonnull))
  * @param self Dialog.
  * @return @c true if timeout reached.
  */
-bool LeelenDialog_check_timeout (struct LeelenDialog *self);
+bool LeelenDialog_ack_timeout (struct LeelenDialog *self);
+__attribute__((pure, warn_unused_result, nonnull, access(read_only, 1)))
+/**
+ * @memberof LeelenDialog
+ * @brief Check if dialog timed out.
+ *
+ * @param self Dialog.
+ * @param now Current time.
+ * @return @c true if timeout reached.
+ */
+static inline bool LeelenDialog_dialog_timeout (
+    const struct LeelenDialog *self, time_t now) {
+  return self->last_activity + self->duration < now;
+}
 
 __attribute__((nonnull))
 /**
@@ -155,7 +174,8 @@ __attribute__((nonnull(1), access(read_only, 4), access(read_only, 5)))
  * @param sockfd Socket for sending reply.
  * @param audio_formats Audio description. Can be @c NULL.
  * @param video_formats Video description. Can be @c NULL.
- * @return 0 on success, -1 if @c sendto() error.
+ * @return 0 on success, 255 if @p self->id is 0 or @p self->mtu too small, -1
+ *  if @c sendto() error.
  */
 int LeelenDialog_send (
   struct LeelenDialog *self, unsigned int code, int sockfd,
@@ -199,14 +219,15 @@ __attribute__((nonnull(1, 2, 3), access(write_only, 1), access(read_only, 2),
  * @param[out] self Dialog.
  * @param config Device config.
  * @param theirs Peer address.
- * @param to Peer phone number. If @c NULL, the phone number is waiting to be
+ * @param their Peer phone number. If @c NULL, the phone number is waiting to be
  *  filled by LeelenDialog_receive().
  * @param id Dialog ID. If 0, a random ID will be generated.
  * @return 0.
  */
 int LeelenDialog_init (
   struct LeelenDialog *self, const struct LeelenConfig *config,
-  const struct sockaddr *theirs, const struct LeelenNumber *to, leelen_id_t id);
+  const struct sockaddr *theirs, const struct LeelenNumber *their,
+  leelen_id_t id);
 
 
 #ifdef __cplusplus

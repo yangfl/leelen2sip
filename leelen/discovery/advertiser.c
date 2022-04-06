@@ -42,7 +42,7 @@ int LeelenAdvertiser_reply (
               s_ouraddr, sizeof(s_ouraddr));
   }
 
-  char buf[self->config->mtu];
+  char buf[self->mtu];
   int buflen = snprintf(
     buf, sizeof(buf), LEELEN_DISCOVERY_FORMAT,
     self->report_addr[0] == '\0' ? s_ouraddr : self->report_addr,
@@ -69,7 +69,7 @@ int LeelenAdvertiser_receive (
 
 int LeelenAdvertiser_set_report_addr (
     struct LeelenAdvertiser *self, int af, const void *addr) {
-  if (af == AF_INET6) {
+  if unlikely (af == AF_INET6) {
     if (IN6_IS_ADDR_LOOPBACK(addr)) {
       strcpy(self->report_addr, "127.0.0.1");
       return 0;
@@ -77,17 +77,27 @@ int LeelenAdvertiser_set_report_addr (
     if (IN6_IS_ADDR_V4OK(addr)) {
       af = AF_INET;
       addr = &((const struct in6_addr *) addr)->s6_addr32[3];
+      goto ipv4;
     }
+    goto_if (IN6_IS_ADDR_UNSPECIFIED(addr)) unset;
+  } else if (af == AF_INET) {
+ipv4:
+    goto_if (((struct in_addr *) addr)->s_addr == 0) unset;
+  } else if likely (af == AF_UNSPEC) {
+unset:
+    self->report_addr[0] = '\0';
+    return 0;
+  } else {
+    return 255;
   }
-  if (memcmp(&in6addr_any, addr, af == AF_INET ?
-              sizeof(struct in_addr) : sizeof(struct in6_addr)) != 0) {
-    inet_ntop(af, addr, self->report_addr, sizeof(self->report_addr));
-  }
+
+  inet_ntop(af, addr, self->report_addr, sizeof(self->report_addr));
   return 0;
 }
 
 
-int LeelenAdvertiser_fix_report_addr (struct LeelenAdvertiser *self) {
+int LeelenAdvertiser_sync (struct LeelenAdvertiser *self) {
+  self->mtu = self->config->mtu;
   return LeelenAdvertiser_set_report_addr(
     self, self->config->addr.sa_family,
     sockaddr_addr(&self->config->addr.sock));

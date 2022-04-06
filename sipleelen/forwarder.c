@@ -1,5 +1,6 @@
 #include <poll.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <threads.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -11,43 +12,49 @@
 #include "forwarder.h"
 
 
+struct HalfForwarder {
+  single_flag *state;
+  int from;
+  int to;
+  unsigned short mtu;
+};
+
+
 /**
- * @memberof Forwarder
- * @private
- * @brief Forwarder main thread.
+ * @memberof HalfForwarder
+ * @brief HalfForwarder main thread.
  *
- * @param arg Socket forwarder.
+ * @param arg Socket unidirectional forwarder.
  * @return 0.
  */
-static int Forwarder_mainloop (void *arg) {
-  struct Forwarder *self = arg;
-  threadname_format("%d <=> %d", self->socket1, self->socket2);
+static int HalfForwarder_mainloop (void *arg) {
+  struct HalfForwarder *self = arg;
+  single_flag *state = self->state;
+  unsigned char buf[self->mtu];
+  int from = self->from;
+  int to = self->to;
+  free(self);
 
-  struct pollfd pollfds[2] = {
-    {.fd = self->socket1, .events = POLLIN},
-    {.fd = self->socket2, .events = POLLIN},
-  };
+  threadname_format("%d => %d", from, to);
 
-  while (single_continue(&self->state)) {
-    int pollres = poll(pollfds, 2, 1000);
+  struct pollfd pollfd = {.fd = from, .events = POLLIN};
+
+  while (single_continue(state)) {
+    int pollres = poll(&pollfd, 1, 1000);
     should (pollres >= 0) otherwise {
       LOG_PERROR(LOG_LEVEL_WARNING, "poll() failed");
       continue;
     }
     continue_if (pollres <= 0);
 
-    for (int i = 0; i < 2; i++) {
-      continue_if (pollfds[i].revents == 0);
-      unsigned char buf[self->mtu];
-      int buflen = recv(pollfds[i].fd, buf, sizeof(buf), MSG_DONTWAIT);
-      should (buflen >= 0) otherwise {
-        LOG_PERROR(LOG_LEVEL_WARNING, "recv() failed");
-        continue;
-      }
-      should (send(pollfds[!i].fd, buf, buflen, 0) == buflen) otherwise {
-        LOG_PERROR(LOG_LEVEL_WARNING, "send() failed");
-        continue;
-      }
+    int buflen = recv(from, buf, sizeof(buf), MSG_DONTWAIT);
+    should (buflen >= 0) otherwise {
+      LOG_PERROR(LOG_LEVEL_WARNING, "recv() failed");
+      continue;
+    }
+    should (send(to, buf, buflen, 0) == buflen) otherwise {
+      LOG_PERROR(LOG_LEVEL_WARNING, "send() failed");
+      continue;
     }
   }
 
@@ -57,7 +64,32 @@ static int Forwarder_mainloop (void *arg) {
 
 int Forwarder_start (struct Forwarder *self) {
   return_if_fail (self->socket1 >= 0 && self->socket2 >= 0) 255;
-  return single_start(&self->state, Forwarder_mainloop, self);
+
+  return_if_fail (single_acquire(&self->state)) 0;
+
+  for (int i = 0; i < 2; i++) {
+    struct HalfForwarder *half = malloc(sizeof(struct HalfForwarder));
+    goto_if_fail (half != NULL) fail;
+    half->state = &self->state;
+    if (i == 0) {
+      half->from = self->socket1;
+      half->to = self->socket2;
+    } else {
+      half->from = self->socket2;
+      half->to = self->socket1;
+    }
+    half->mtu = self->mtu;
+    should (thrd_execute(
+        HalfForwarder_mainloop, half) == thrd_success) otherwise {
+      free(half);
+      goto fail;
+    }
+  }
+  return 0;
+
+fail:
+  single_finish(&self->state);
+  return -1;
 }
 
 
