@@ -45,7 +45,7 @@ static int _SIPLeelen_ist_invite_process (void *arg) {
   osip_message_t *request = tr->orig_request;
   struct SIPLeelen *self = tr->your_instance;
   int trid = tr->transactionid;
-  struct SIPLeelenSession *session = SIPTransactionData_get(tr, session);
+  struct SIPLeelenSession *session = tr->reserved1;
   int status_code;
 
   threadname_format("INVITE %d", trid);
@@ -55,7 +55,7 @@ static int _SIPLeelen_ist_invite_process (void *arg) {
     // discovery
     struct LeelenHost host;
     int res = LeelenDiscovery_discovery(
-      &self->device, &host, session->number.str);
+      &self->leelen, &host, session->number.str);
     should (res == 0) otherwise {
       switch (res) {
         case -1:
@@ -84,8 +84,8 @@ static int _SIPLeelen_ist_invite_process (void *arg) {
     }
 
     // convert address if needed
-    if (self->config->addr.sa_family != host.sa_family) {
-      if (self->config->addr.sa_family == AF_INET6) {
+    if (self->leelen.config->addr.sa_family != host.sa_family) {
+      if (self->leelen.config->addr.sa_family == AF_INET6) {
         sockaddr_to6(&host.sock);
       } else {
         should (sockaddr_to4(&host.sock) != NULL) otherwise {
@@ -101,7 +101,7 @@ static int _SIPLeelen_ist_invite_process (void *arg) {
 
     // connect
     LeelenDialog_init(
-      &session->leelen, self->config, &host.sock, &session->number, 0);
+      &session->leelen, self->leelen.config, &host.sock, &session->number, 0);
     LeelenHost_destroy(&host);
     LOG(LOG_LEVEL_DEBUG, "Transaction %d: Start LEELEN dialog " PRI_LEELEN_ID,
         trid, session->leelen.id);
@@ -137,6 +137,8 @@ static int _SIPLeelen_ist_invite_process (void *arg) {
     goto reply;
   }
 
+  int ret = 0;
+
   // send fail SIP message
   if (0) {
 reply:
@@ -145,33 +147,12 @@ reply:
       LOG(LOG_LEVEL_WARNING,
           "Transaction %d: Out of memory, reply not sent", trid);
     }
-    single_finish(&session->invite_state);
-    return 1;
+    ret = 1;
   }
 
-  // wait LEELEN reply
   single_finish(&session->invite_state);
-  usleep(LEELEN_VOIP_TIMEOUT * 1000);
-
-  osip_transaction_t *orig_tr = atomic_exchange(&session->transaction, NULL);
-  return_if (orig_tr == NULL) 0;
-  LOG(LOG_LEVEL_DEBUG, "Transaction %d: Dial timeout", orig_tr->transactionid);
-
-  // end LEELEN dialog
-  should (LeelenDialog_may_bye(
-      &session->leelen, self->socket_leelen) >= 0) otherwise {
-    LOG_PERROR(
-      LOG_LEVEL_WARNING, "Transaction %d: Cannot close LEELEN session",
-      orig_tr->transactionid);
-  }
-
-  should (osip_transaction_response(
-      orig_tr, 404, self->ua, true) == OSIP_SUCCESS) otherwise {
-    LOG(LOG_LEVEL_WARNING, "Transaction %d: Out of memory, reply not sent",
-        orig_tr->transactionid);
-  }
-
-  return 0;
+  SIPLeelenSession_decref(session);
+  return ret;
 }
 
 
@@ -190,8 +171,14 @@ static void _SIPLeelen_ist_invite (
 
   struct SIPLeelen *self = tr->your_instance;
   int trid = tr->transactionid;
-  struct SIPLeelenSession *session = SIPTransactionData_get(tr, session);
+  struct SIPLeelenSession *session = tr->reserved1;
   int status_code;
+
+  should (!SIPLeelenSession_established(session)) otherwise {
+    LOG(LOG_LEVEL_DEBUG, "Transaction %d: re-INVITE, reject", trid);
+    status_code = 488;
+    goto reply;
+  }
 
   should (osip_message_has_sdp(request)) otherwise {
     LOG(LOG_LEVEL_DEBUG, "Transaction %d: INVITE does not has SDP", trid);
@@ -215,7 +202,7 @@ static void _SIPLeelen_ist_invite (
       goto reply;
     }
     should (LeelenNumber_init(
-        &number, username, &self->config->number) == 0) otherwise {
+        &number, username, &self->leelen.config->number) == 0) otherwise {
       LOG(LOG_LEVEL_DEBUG, "Transaction %d: Cannot parse %s", trid, username);
       status_code = 410;
       goto reply;
@@ -238,9 +225,11 @@ static void _SIPLeelen_ist_invite (
 
     session->number = number;
 
+    SIPLeelenSession_incref(session);
     should (single_start(
         &session->invite_state, _SIPLeelen_ist_invite_process, tr
     ) == 0) otherwise {
+      SIPLeelenSession_decref(session);
       LOG_PERROR(
         LOG_LEVEL_WARNING, "Transaction %d: Cannot start thread", trid);
       status_code = 500;
@@ -261,34 +250,6 @@ reply:
 /**
  * @relates SIPTransactionData
  * @private
- * @brief Process INVITE ACK message.
- *
- * @param type Transaction type.
- * @param tr Transaction.
- * @param request OSIP Request.
- */
-static void _SIPLeelen_ist_ack (
-    int type, osip_transaction_t *tr, osip_message_t *request) {
-  (void) type;
-  (void) request;
-
-  int trid = tr->transactionid;
-  struct SIPLeelenSession *session = SIPTransactionData_get(tr, session);
-  return_if (session == NULL);
-
-  LOG(
-    LOG_LEVEL_DEBUG, "Transaction %d: Connection established, dialog "
-    PRI_LEELEN_CODE ", session %s",
-    trid, session->leelen.id, session->sip->call_id);
-
-  // SIPLeelenSession now are ours
-  SIPTransactionData_get(tr, session) = NULL;
-}
-
-
-/**
- * @relates SIPTransactionData
- * @private
  * @brief Process BYE or CANCEL request.
  *
  * @param type Transaction type.
@@ -298,69 +259,52 @@ static void _SIPLeelen_ist_ack (
 static void _SIPLeelen_nist_bye (
     int type, osip_transaction_t *tr, osip_message_t *request) {
   (void) type;
+  (void) request;
 
   struct SIPLeelen *self = tr->your_instance;
   int trid = tr->transactionid;
-  int status_code = 200;
+  struct SIPLeelenSession *session = tr->reserved1;
+  int status_code;
 
-  // find session
-  SIPLeelen_lock_sessions(self);
-  forindex (int, i, self->sessions, self->n_session) {
-    struct SIPLeelenSession *session = self->sessions[i];
-    osip_transaction_t *orig_tr = session->transaction;
-    if (session->sip != NULL) {
-      continue_if_not (
-        osip_dialog_match_as_uas(session->sip, request) == OSIP_SUCCESS);
-    } else if (orig_tr != NULL) {
-      continue_if_not (
-        orig_tr->callid->number != NULL && tr->callid->number != NULL &&
-        strcmp(orig_tr->callid->number, tr->callid->number) == 0);
-    } else {
-      continue;
-    }
-    LOG(LOG_LEVEL_DEBUG, "Transaction %d: Matched dialog %08x",
-        trid, session->leelen.id);
-
-    // wait SIPLeelenSession_receive to end normal dialog
-    orig_tr = atomic_exchange(&session->transaction, NULL);
-    if (orig_tr != NULL) {
-      // CANCEL if only INVITE not finished, or BYE if only INVITE finished
-      should (
-          (type == OSIP_NIST_CANCEL_RECEIVED &&
-           orig_tr->state == IST_PROCEEDING) ||
-          (type == OSIP_NIST_BYE_RECEIVED && orig_tr->state != IST_PROCEEDING)
-      ) otherwise {
-        // Section 15.1.1, close anyway
-        status_code = 481;
-      }
-      // only send SIP message when we have not reached IST_COMPLETED
-      if (orig_tr->state == IST_PROCEEDING) {
-        should (osip_transaction_response(
-            orig_tr, 487, self->ua, false) == OSIP_SUCCESS) otherwise {
-          LOG(LOG_LEVEL_WARNING, "Transaction %d: Out of memory",
-              orig_tr->transactionid);
-        }
-      }
-    }
-
-    // end LEELEN session
-    should (LeelenDialog_may_bye(
-        &session->leelen, self->socket_leelen) >= 0) otherwise {
-      LOG_PERROR(LOG_LEVEL_WARNING,
-                  "Transaction %d: Cannot close LEELEN session", trid);
-      status_code = 500;
-    }
-
-    // destroy SIPLeelenSession
-    SIPTransactionData_get(tr, session) = session;
+  should (session != NULL) otherwise {
+    // no session matched
+    status_code = 481;
     goto reply;
   }
-  LOG(LOG_LEVEL_INFO, "Transaction %d: Cannot match any session", trid);
-  status_code = 481;
-reply:
-  SIPLeelen_unlock_sessions(self);
+
+  status_code = 200;
+
+  if (session->leelen.state == LEELEN_DIALOG_CONNECTING) {
+    osip_transaction_t *orig_tr = session->transaction;
+
+    // CANCEL if only INVITE not finished, or BYE if only INVITE finished
+    should (
+        (type == OSIP_NIST_CANCEL_RECEIVED &&
+         orig_tr->state == IST_PROCEEDING) ||
+        (type == OSIP_NIST_BYE_RECEIVED && orig_tr->state != IST_PROCEEDING)
+    ) otherwise {
+      // Section 15.1.1, close anyway
+      status_code = 481;
+    }
+
+    // only send SIP message when we have not reached IST_COMPLETED
+    if (orig_tr->state == IST_PROCEEDING) {
+      should (osip_transaction_response(
+          orig_tr, 487, self->ua, false) == OSIP_SUCCESS) otherwise {
+        LOG(LOG_LEVEL_WARNING, "Transaction %d: Out of memory",
+            orig_tr->transactionid);
+      }
+    }
+  }
+
+  // end LEELEN session
+  should (SIPLeelenSession_bye_leelen(session) == 0) otherwise {
+    LOG_PERROR(LOG_LEVEL_WARNING,
+               "Transaction %d: Cannot close LEELEN session", trid);
+  }
 
   // send SIP message
+reply:
   should (osip_transaction_response(
       tr, status_code, self->ua, false) == OSIP_SUCCESS) otherwise {
     LOG(LOG_LEVEL_WARNING, "Transaction %d: Out of memory", trid);
@@ -405,12 +349,18 @@ static void _SIPLeelen_register (
     osip_transaction_send_sipmessage(tr, response, false) == OSIP_SUCCESS) fail;
 
   if (type == OSIP_NIST_REGISTER_RECEIVED) {
+    // save client URL
+    char *url;
+    if likely (osip_uri_to_str(tr->from->url, &url) == OSIP_SUCCESS) {
+      free(atomic_exchange(&self->client, strdup(url)));
+      osip_free(url);
+    }
     // save client ip
     char *host;
     int port;
     osip_response_get_destination(request, &host, &port);
-    sockaddr46_aton(host, &self->client);
-    self->client.sa_port = htons(port);
+    sockaddr46_aton(host, &self->clients);
+    self->clients.sa_port = htons(port);
   }
 
   if (0) {
@@ -418,7 +368,11 @@ fail:
     LOG(LOG_LEVEL_WARNING, "Transaction %d: Out of memory", trid);
     osip_message_free(response);
   }
+  // bug
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-malloc-leak"
   return;
+#pragma GCC diagnostic pop
 }
 
 
@@ -432,10 +386,6 @@ int SIPLeelen_set_uas_callbacks (struct SIPLeelen *self) {
     self->osip, OSIP_IST_INVITE_RECEIVED, _SIPLeelen_ist_invite);
   osip_set_message_callback(
     self->osip, OSIP_IST_INVITE_RECEIVED_AGAIN, _SIPLeelen_ist_invite);
-  osip_set_message_callback(
-    self->osip, OSIP_IST_ACK_RECEIVED, _SIPLeelen_ist_ack);
-  osip_set_message_callback(
-    self->osip, OSIP_IST_ACK_RECEIVED_AGAIN, _SIPLeelen_ist_ack);
 
   osip_set_message_callback(
     self->osip, OSIP_NIST_BYE_RECEIVED, _SIPLeelen_nist_bye);

@@ -17,6 +17,11 @@ extern "C" {
  * @brief VoIP timeout, in milliseconds
  */
 #define LEELEN_VOIP_TIMEOUT 500
+/**
+ * @ingroup leelen-voip
+ * @brief default dialog duration, in seconds
+ */
+#define LEELEN_VOIP_DURATION 10
 
 /**
  * @ingroup leelen-voip

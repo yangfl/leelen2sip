@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/time.h>
+#include <sys/time.h>  // osip
 
 #include <osip2/osip.h>
 #include <osipparser2/sdp_message.h>
@@ -26,11 +26,14 @@ bool osip_message_has_sdp (osip_message_t *message) {
 
 
 int osip_message_get_sdp (osip_message_t *message, sdp_message_t **sdp) {
-  for (int i = 0; !osip_list_eol(&message->bodies, i); i++) {
-    return_if_fail (sdp_message_init(sdp) == OSIP_SUCCESS) OSIP_NOMEM;
+  for (int i = 0;; i++) {
+    osip_body_t *body = osip_list_get(&message->bodies, i);
+    break_if_fail (body != NULL);
+
+    int res = sdp_message_init(sdp);
+    return_if_fail (res == OSIP_SUCCESS) res;
     return_if (sdp_message_parse(
-      *sdp, ((osip_body_t *) osip_list_get(&message->bodies, i))->body
-    ) == OSIP_SUCCESS) OSIP_SUCCESS;
+      *sdp, body->body) == OSIP_SUCCESS) OSIP_SUCCESS;
     sdp_message_free(*sdp);
   }
   return OSIP_UNDEFINED_ERROR;
@@ -49,11 +52,13 @@ int osip_message_set_now (osip_message_t *sip) {
 
 int osip_message_set_status_code_and_reason_phrase (
     osip_message_t *sip, int status) {
-  osip_message_set_status_code(sip, status);
+  sip->status_code = status;
 
-  char *reason_phrase = osip_strdup(osip_message_get_reason(status));
-  return_if_fail (reason_phrase != NULL) OSIP_NOMEM;
-  osip_message_set_reason_phrase(sip, reason_phrase);
+  {
+    char *reason_phrase = osip_strdup(osip_message_get_reason(status));
+    return_if_fail (reason_phrase != NULL) OSIP_NOMEM;
+    sip->reason_phrase = reason_phrase;
+  }
 
   return OSIP_SUCCESS;
 }
@@ -105,12 +110,15 @@ int osip_message_response (
     osip_message_set_max_forwards(*response, "70") == OSIP_SUCCESS) fail;
   if (ua != NULL) {
     goto_if_fail (
+      osip_message_set_user_agent(*response, ua) == OSIP_SUCCESS) fail;
+    goto_if_fail (
       osip_message_set_server(*response, ua) == OSIP_SUCCESS) fail;
   }
   return OSIP_SUCCESS;
 
 fail:
   osip_message_free(*response);
+  *response = NULL;
   return OSIP_NOMEM;
 }
 
@@ -126,8 +134,11 @@ int osip_message_request (
   int res = osip_message_init(request);
   return_if_fail (res == OSIP_SUCCESS) res;
 
-  (*request)->sip_method = osip_strdup(method);
-  goto_if_fail ((*request)->sip_method != NULL) fail;
+  {
+    char *method_ = osip_strdup(method);
+    goto_if_fail (method_ != NULL) fail;
+    (*request)->sip_method = method_;
+  }
 
   {
     char via[64];
@@ -171,8 +182,7 @@ int osip_message_request (
        URI */
     osip_list_iterator_t it;
     // bug: should be "const osip_list_t *"
-    osip_route_t *route = (osip_route_t *) osip_list_get_first(
-      (osip_list_t *) &dialog->route_set, &it);
+    osip_route_t *route = osip_list_get_first(&dialog->route_set, &it);
 
     osip_uri_param_t *lr_param;
     osip_uri_uparam_get_byname(route->url, "lr", &lr_param);
@@ -184,12 +194,12 @@ int osip_message_request (
       ) == OSIP_SUCCESS) fail;
       /* "[request] MUST includes a Route header field containing
          the route set values in order." */
-      for (; route != NULL; route = (osip_route_t *) osip_list_get_next(&it)) {
-        osip_route_t *route2;
-        goto_if_fail (osip_route_clone(route, &route2) == OSIP_SUCCESS) fail;
+      for (; route != NULL; route = osip_list_get_next(&it)) {
+        osip_route_t *route_;
+        goto_if_fail (osip_route_clone(route, &route_) == OSIP_SUCCESS) fail;
         should (osip_list_add(
-            &(*request)->routes, route2, -1) == OSIP_SUCCESS) otherwise {
-          osip_route_free(route2);
+            &(*request)->routes, route_, -1) == OSIP_SUCCESS) otherwise {
+          osip_route_free(route_);
           goto fail;
         }
       }
@@ -202,13 +212,14 @@ int osip_message_request (
       /* "The UAC MUST add a route header field containing
          the remainder of the route set values in order. */
       /* yes it is, skip first */
-      for (route = (osip_route_t *) osip_list_get_next(&it); route != NULL;
-           route = (osip_route_t *) osip_list_get_next(&it)) {
-        osip_route_t *route2;
-        goto_if_fail (osip_route_clone(route, &route2) == OSIP_SUCCESS) fail;
+      while (1) {
+        route = osip_list_get_next(&it);
+        break_if_fail (route != NULL);
+        osip_route_t *route_;
+        goto_if_fail (osip_route_clone(route, &route_) == OSIP_SUCCESS) fail;
         should (osip_list_add(
-            &(*request)->routes, route2, -1) == OSIP_SUCCESS) otherwise {
-          osip_route_free(route2);
+            &(*request)->routes, route_, -1) == OSIP_SUCCESS) otherwise {
+          osip_route_free(route_);
           goto fail;
         }
       }
@@ -239,6 +250,7 @@ int osip_message_request (
 
 fail:
   osip_message_free(*request);
+  *request = NULL;
   return OSIP_NOMEM;
 }
 

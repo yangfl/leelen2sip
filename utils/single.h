@@ -127,6 +127,15 @@ inline void single_stop (single_flag *flag) {
   atomic_compare_exchange_strong(flag, &running, SINGLE_STOPPING);
 }
 
+__attribute__((warn_unused_result, nonnull))
+/**
+ * @brief Acquire single flag.
+ *
+ * @param[in,out] flag Single flag.
+ * @return @c true if flag acquired.
+ */
+bool single_acquire (single_flag *flag);
+
 __attribute__((nonnull(1, 2)))
 /**
  * @brief Start function in foreground.
@@ -202,7 +211,7 @@ __attribute__((nonnull(1)))
  *
  * @param func Function to start in background.
  * @param arg Argument to pass to the function.
- * @return thrd_success on success, error otherwise.
+ * @return @c thrd_success on success, error otherwise.
  */
 inline int thrd_execute (thrd_start_t func, void *arg) {
   thrd_t thread;

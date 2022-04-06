@@ -39,15 +39,12 @@ struct SIPLeelenSession;
  * @brief LEELEN2SIP object.
  */
 struct SIPLeelen {
-  union {
-    struct LeelenDiscovery device;
-    /// device config
-    const struct LeelenConfig *config;
-  };
+  /// LEELEN discovery daemon
+  struct LeelenDiscovery leelen;
 
   /// SIP user agent
   char *ua;
-  /// address for outgoing data
+  /// address for SIP outgoing data
   /// @note usually `addr.sa_port == 5060`
   union sockaddr_in46 addr;
   /// maximum transmission unit for UDP packet
@@ -56,10 +53,12 @@ struct SIPLeelen {
   /** @privatesection */
   /// OSIP stack
   osip_t *osip;
+  /// URL of end user
+  char *client;
   /// address of end user (only support single user)
-  union sockaddr_in46 client;
+  union sockaddr_in46 clients;
 
-  /// SIP sessions, used to do Dialog ID -> session mapping
+  /// SIP sessions, holding SIPLeelenSession::refcount for LEELEN dialog
   struct SIPLeelenSession **sessions;
   /// mutex for SIPLeelen::sessions
   mtx_t mtx_sessions;
@@ -78,41 +77,32 @@ struct SIPLeelen {
 __attribute__((nonnull))
 /**
  * @memberof SIPLeelen
- * @brief Lock @p self->sessions.
- *
- * @param self LEELEN2SIP object.
- */
-void SIPLeelen_lock_sessions (struct SIPLeelen *self);
-__attribute__((nonnull))
-/**
- * @memberof SIPLeelen
- * @brief Unlock @p self->sessions.
- *
- * @param self LEELEN2SIP object.
- */
-void SIPLeelen_unlock_sessions (struct SIPLeelen *self);
-
-__attribute__((nonnull))
-/**
- * @memberof SIPLeelen
  * @brief Create a new session in @p self->sessions.
  *
  * @param self LEELEN2SIP object.
- * @return Index of new session, or @c -1 if failed.
+ * @param lock =0: Don't perform locking/unlocking; >0: Perform
+ *  locking/unlocking; <0: Don't perform locking, but perform unlocking.
+ * @return New session, or @c NULL on error.
  */
-int SIPLeelen_create_session (struct SIPLeelen *self);
+struct SIPLeelenSession *SIPLeelen_new_session (
+  struct SIPLeelen *self, int lock);
 __attribute__((nonnull, access(read_only, 2)))
 /**
  * @memberof SIPLeelen
- * @brief Remove a new session from @p self->sessions.
+ * @brief Decrease reference counter of a session in @p self->sessions and
+ *  destroy it when necessary.
  *
  * @param self LEELEN2SIP object.
  * @param session LEELEN2SIP session.
+ * @param index Index of @p session in @p self->sessions, or @c -1 if unknown.
+ * @param lock =0: Don't perform locking/unlocking; >0: Perform
+ *  locking/unlocking; <0: Don't perform locking, but perform unlocking.
  */
-void SIPLeelen_remove_session (
-  struct SIPLeelen *self, const struct SIPLeelenSession *session);
+void SIPLeelen_decref_session (
+  struct SIPLeelen *self, struct SIPLeelenSession *session, int index,
+  int lock);
 
-__attribute__((nonnull(1, 2), access(read_only, 5)))
+__attribute__((nonnull(1, 2), access(read_only, 5), access(read_only, 6)))
 /**
  * @memberof SIPLeelen
  * @brief Process incoming SIP message.
@@ -122,12 +112,13 @@ __attribute__((nonnull(1, 2), access(read_only, 5)))
  * @param len Length of message.
  * @param sockfd Socket that received the message.
  * @param src Source address of the message.
+ * @param recv_dst Local address that received the packet.
  * @return 0 on success, 1 if message cannot be parese, 2 if error on processing
  *  message.
  */
 int SIPLeelen_receive (
   struct SIPLeelen *self, char *buf, int len, int sockfd,
-  const struct sockaddr *src);
+  const struct sockaddr *src, const void *recv_dst);
 __attribute__((nonnull(1, 2), access(read_only, 5)))
 /**
  * @memberof SIPLeelen
@@ -144,16 +135,6 @@ __attribute__((nonnull(1, 2), access(read_only, 5)))
 int SIPLeelen_receive_leelen (
   struct SIPLeelen *self, char *buf, int len, int sockfd,
   const struct sockaddr *src);
-
-__attribute__((nonnull))
-/**
- * @memberof SIPLeelen
- * @brief Check if transactions need timer events, and consume all pending
- *  events.
- *
- * @param self LEELEN2SIP object.
- */
-void SIPLeelen_execute (struct SIPLeelen *self);
 
 __attribute__((nonnull))
 /**

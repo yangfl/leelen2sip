@@ -5,9 +5,12 @@
 extern "C" {
 #endif
 
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <netinet/in.h>
 #include <sys/time.h>  // osip
 
+#include <inet46i/in46.h>
 #include <osip2/osip.h>
 #include <osip2/osip_dialog.h>
 
@@ -34,13 +37,17 @@ struct SIPLeelenSession {
   /// SIP transaction, borrowed
   osip_transaction_t *transaction;
 
+  /// reference counter
+  atomic_uint refcount;
+
+  /// local address that received the SIP request
+  union in46_addr ours;
+
   /** @privatesection */
   /// audio forwarder (usually of port #LEELEN_AUDIO_PORT)
   struct Forwarder audio;
   /// video forwarder (usually of port #LEELEN_VIDEO_PORT)
   struct Forwarder video;
-
-  /// SIP audio port
 
   /// mutex
   mtx_t mtx;
@@ -50,6 +57,16 @@ struct SIPLeelenSession {
   /// LEELEEN phone number (for SIP INVITE)
   struct LeelenNumber number;
 };
+
+__attribute__((warn_unused_result, nonnull))
+/**
+ * @memberof SIPLeelenSession
+ * @brief Test if session is established.
+ *
+ * @param self LEELEN2SIP session.
+ * @return @c true if established.
+ */
+bool SIPLeelenSession_established (struct SIPLeelenSession *self);
 
 __attribute__((nonnull))
 /**
@@ -81,6 +98,37 @@ static inline void SIPLeelenSession_stop_forward (
   Forwarder_stop(&self->video);
 }
 
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelen
+ * @brief Disconnect session on LEELEN half.
+ *
+ * @param self LEELEN2SIP object.
+ * @return 0 on success, -1 on error and @c errno is set appropriately.
+ */
+int SIPLeelenSession_bye_leelen (struct SIPLeelenSession *self);
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelen
+ * @brief Disconnect session on SIP half.
+ *
+ * @param self LEELEN2SIP object.
+ * @param now Whether to send SIP transaction now.
+ * @return 0 on success, 255 if @p self->sip is @c NULL, -1 if SIP stack error.
+ */
+int SIPLeelenSession_bye_sip (struct SIPLeelenSession *self, bool now);
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelen
+ * @brief Disconnect session on LEELEN half.
+ *
+ * @param self LEELEN2SIP object.
+ * @param now Whether to send SIP transaction now.
+ * @return 0 on success; if 1 set, error on sending LEELEN BYE; if 2 set, error
+ *  on creating SIP transaction.
+ */
+int SIPLeelenSession_bye (struct SIPLeelenSession *self, bool now);
+
 __attribute__((nonnull(1)))
 /**
  * @memberof SIPLeelen
@@ -106,6 +154,49 @@ __attribute__((nonnull))
  * @param self LEELEN2SIP session.
  */
 void SIPLeelenSession_destroy (struct SIPLeelenSession *self);
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelenSession
+ * @brief Destroy a LEELEN2SIP session when necessary.
+ *
+ * This function does wait for the threads to stop.
+ *
+ * @param self LEELEN2SIP session.
+ * @return @c true if session was destroyed.
+ */
+bool SIPLeelenSession_may_destroy (struct SIPLeelenSession *self);
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelenSession
+ * @brief Decrease reference counter of a LEELEN2SIP session and destroy it when
+ *  necessary.
+ *
+ * @param self LEELEN2SIP session.
+ * @return @c true if session was destroyed.
+ */
+bool SIPLeelenSession_decref (struct SIPLeelenSession *self);
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelenSession
+ * @brief Reference counter overflow handler.
+ *
+ * @param self LEELEN2SIP session.
+ */
+void SIPLeelenSession_incref_overflow (struct SIPLeelenSession *self);
+
+__attribute__((nonnull))
+/**
+ * @memberof SIPLeelenSession
+ * @brief Increase reference counter of a LEELEN2SIP session.
+ *
+ * @param self LEELEN2SIP session.
+ */
+static inline void SIPLeelenSession_incref (struct SIPLeelenSession *self) {
+  if (!__builtin_expect(++self->refcount > 0, 1)) {
+    SIPLeelenSession_incref_overflow(self);
+  }
+}
+
 __attribute__((nonnull, access(write_only, 1), access(read_only, 2)))
 /**
  * @memberof SIPLeelenSession

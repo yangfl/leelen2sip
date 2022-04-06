@@ -31,20 +31,19 @@ int LeelenDiscovery_discovery (
   mtx_lock(&self->mutex);
 
   // write output parameters
-  self->host = host;
   self->initres = 254;  // timeout reached
 
   // send solicitation
   int res;
   if (self->spec_sockfd >= 0) {
     res = LeelenHost__discovery(
-      self->spec_af, self->spec_sockfd, self->config->discovery, phone);
+      self->addr.sa_family, self->spec_sockfd, self->port, phone);
   } else {
     res = likely (self->sockfd6 < 0) ? 255 : LeelenHost__discovery(
-      AF_INET6, self->sockfd6, self->config->discovery, phone);
+      AF_INET6, self->sockfd6, self->port, phone);
     if likely (self->sockfd >= 0) {
       int res4 = LeelenHost__discovery(
-        AF_INET, self->sockfd, self->config->discovery, phone);
+        AF_INET, self->sockfd, self->port, phone);
       if (res != 0) {
         res = res4;
       }
@@ -55,12 +54,12 @@ int LeelenDiscovery_discovery (
     // wait for reply
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);
-    ts.tv_nsec += self->config->timeout * 1000000;
+    ts.tv_nsec += self->timeout * 1000000;
     ts.tv_sec += ts.tv_nsec / 1000000000;  // handle nsec overflow
     ts.tv_nsec %= 1000000000;
     cnd_timedwait(&self->cond, &self->mutex, &ts);
     // fetch result
-    self->host = NULL;
+    *host = self->host;
     res = self->initres;
   }
 
@@ -74,15 +73,15 @@ int LeelenDiscovery_discovery (
  * @private
  * @brief Discovery main thread.
  *
- * @param args Discovery daemon.
+ * @param arg Discovery daemon.
  * @return 0.
  */
-static int LeelenDiscovery_mainloop (void *args) {
+static int LeelenDiscovery_mainloop (void *arg) {
   threadname_set("Discovery");
 
-  struct LeelenDiscovery *self = args;
-  void *spec_dst = sockaddr_addr(&self->config->addr.sock);
-  uint32_t spec_ifindex = self->config->addr.sa_scope_id;
+  struct LeelenDiscovery *self = arg;
+  void *spec_dst = sockaddr_addr(&self->addr.sock);
+  uint32_t spec_ifindex = self->addr.sa_scope_id;
 
   struct pollfd pollfds[3];
   int n_pollfd = 0;
@@ -117,7 +116,7 @@ static int LeelenDiscovery_mainloop (void *args) {
       continue_if (pollfds[i].revents == 0);
 
       // read incoming packet
-      char buf[self->config->mtu + 1];
+      char buf[self->mtu + 1];
       union sockaddr_in46 src;
       socklen_t srclen = sizeof(src);
       union sockaddr_in46 dst;
@@ -141,7 +140,7 @@ static int LeelenDiscovery_mainloop (void *args) {
 
       // process
       if (is_advertisement) {
-        if likely (self->host != NULL) {
+        if likely (self->initres > 8) {
           // filter destination address
           if (has_spec && i != 0) {
             LOGEVENT (LOG_LEVEL_INFO) {
@@ -153,9 +152,8 @@ static int LeelenDiscovery_mainloop (void *args) {
             }
           } else {
             mtx_lock(&self->mutex);
-            if likely (self->host != NULL) {
-              self->initres = LeelenHost_init(self->host, buf, &src.sock);
-              self->host = NULL;
+            if likely (self->initres > 8) {
+              self->initres = LeelenHost_init(&self->host, buf, &src.sock);
               cnd_signal(&self->cond);
             }
             mtx_unlock(&self->mutex);
@@ -193,20 +191,18 @@ int LeelenDiscovery_start (struct LeelenDiscovery *self) {
 
 
 int LeelenDiscovery_connect (struct LeelenDiscovery *self) {
-  const struct LeelenConfig *config = self->config;
-
   union sockaddr_in46 leelen_addr_local = {
-    .sa_scope_id = config->addr.sa_scope_id,
-    .sa_port = htons(config->discovery_src),
+    .sa_scope_id = self->addr.sa_scope_id,
+    .sa_port = self->addr.sa_port,
   };
   const int on = 1;
 
-  bool listen_v6 = config->addr.sa_family == AF_INET6;
-  bool listen_v4 = config->addr.sa_family != AF_INET6 ||
-                   IN6_IS_ADDR_UNSPECIFIED(&config->addr.v6.sin6_addr);
-  bool has_spec = config->addr.sa_family == AF_INET6 ?
-    !IN6_IS_ADDR_UNSPECIFIED(&config->addr.v6.sin6_addr) :
-    config->addr.v4.sin_addr.s_addr != 0;
+  bool listen_v6 = self->addr.sa_family == AF_INET6;
+  bool listen_v4 = self->addr.sa_family != AF_INET6 ||
+                   IN6_IS_ADDR_UNSPECIFIED(&self->addr.v6.sin6_addr);
+  bool has_spec = self->addr.sa_family == AF_INET6 ?
+    !IN6_IS_ADDR_UNSPECIFIED(&self->addr.v6.sin6_addr) :
+    self->addr.v4.sin_addr.s_addr != 0;
 
   // open v6 socket
   if (unlikely (listen_v6) && likely (self->sockfd6 < 0)) {
@@ -217,7 +213,7 @@ int LeelenDiscovery_connect (struct LeelenDiscovery *self) {
     should (self->sockfd6 >= 0) otherwise {
       return_if_fail (listen_v4) -1;
       LOG_PERROR(LOG_LEVEL_WARNING, "Cannot open IPv6 socket");
-    };
+    }
 
     should (setsockopt(
         self->sockfd6, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on, sizeof(on)
@@ -251,17 +247,37 @@ int LeelenDiscovery_connect (struct LeelenDiscovery *self) {
   // open spec socket
   if (has_spec) {
     in_port_t port = leelen_addr_local.sa_port;
-    leelen_addr_local = config->addr;
+    leelen_addr_local = self->addr;
     leelen_addr_local.sa_port = port;
 
     self->spec_sockfd = openaddr46(
       &leelen_addr_local, SOCK_DGRAM, OPENADDR_REUSEADDR);
     return_if_fail (self->spec_sockfd >= 0) -1;
-
-    self->spec_af = config->addr.sa_family;
   }
 
   return 0;
+}
+
+
+/**
+ * @memberof LeelenDiscovery
+ * @private
+ * @brief Sync own properties from @p self->config.
+ *
+ * @param self Discovery daemon.
+ * @return 0.
+ */
+static int LeelenDiscovery_syncown (struct LeelenDiscovery *self) {
+  self->port = self->config->discovery;
+  self->addr = self->config->addr;
+  self->addr.sa_port = htons(self->config->discovery_src);
+  return 0;
+}
+
+
+int LeelenDiscovery_sync (struct LeelenDiscovery *self) {
+  LeelenDiscovery_syncown(self);
+  return LeelenAdvertiser_sync((struct LeelenAdvertiser *) self);
 }
 
 
@@ -291,10 +307,17 @@ int LeelenDiscovery_init (
     errno = saved_errno;
     return -1;
   }
-  self->state = false;
-  self->spec_af = AF_UNSPEC;
+
+  self->state = SINGLE_FLAG_INIT;
+
   self->spec_sockfd = -1;
   self->sockfd = -1;
   self->sockfd6 = -1;
-  return LeelenAdvertiser_init((struct LeelenAdvertiser *) self, config);
+
+  self->timeout = LEELEN_DISCOVERY_TIMEOUT;
+
+  self->initres = 0;
+
+  LeelenAdvertiser_init((struct LeelenAdvertiser *) self, config);
+  return LeelenDiscovery_syncown(self);
 }

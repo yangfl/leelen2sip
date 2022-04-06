@@ -210,11 +210,9 @@ inline struct sockaddr *sockaddr46_set (
   }
   switch (af) {
     case AF_INET:
-      addr->v4.sin_port = htons(port);
       addr->v4.sin_addr = *(struct in_addr *) host;
       break;
     case AF_INET6:
-      addr->v6.sin6_port = htons(port);
       addr->v6.sin6_addr = *(struct in6_addr *) host;
       addr->v6.sin6_flowinfo = 0;
       addr->v6.sin6_scope_id = 0;
@@ -224,6 +222,7 @@ inline struct sockaddr *sockaddr46_set (
       return NULL;
   }
   addr->sa_family = af;
+  addr->sa_port = htons(port);
   return &addr->sock;
 }
 

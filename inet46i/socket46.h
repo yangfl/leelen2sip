@@ -5,7 +5,11 @@
 extern "C" {
 #endif
 
-#include "sockaddr46.h"
+// #include <sys/socket.h>
+struct sockaddr;
+
+// #include "sockaddr46.h"
+union sockaddr_in46;
 
 /**
  * @file
@@ -33,7 +37,8 @@ __attribute__((nonnull, warn_unused_result, access(read_only, 1)))
  * @return Socket file descriptor, or -1 on error.
  */
 int openaddrz (
-  const struct sockaddr * __restrict addr, int type, int flags, int scope_id);
+  const struct sockaddr * __restrict addr, int type, int flags,
+  unsigned int scope_id);
 __attribute__((nonnull, warn_unused_result, access(read_only, 1)))
 /**
  * @brief Open socket.

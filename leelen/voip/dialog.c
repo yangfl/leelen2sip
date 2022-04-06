@@ -81,20 +81,19 @@ static enum LeelenDialogState LeelenDialogState_nak (
 }
 
 
-bool LeelenDialog_check_timeout (struct LeelenDialog *self) {
-  do {
-    break_if (self->last_sent.tv_sec == 0);
-    struct timespec now;
-    timespec_get(&now, TIME_UTC);
-    break_if_not (timeout_reached(
-      now.tv_sec, now.tv_nsec,
-      self->last_sent.tv_sec, self->last_sent.tv_nsec,
-      LEELEN_VOIP_TIMEOUT * 2 / 1000,
-      (LEELEN_VOIP_TIMEOUT * 2 * 1000000) % 1000000000));
-    self->last_sent.tv_sec = 0;
-    self->state = LeelenDialogState_nak(self->state);
-  } while (0);
-  return self->last_sent.tv_sec == 0;
+bool LeelenDialog_ack_timeout (struct LeelenDialog *self) {
+  return_if (self->last_sent.tv_sec == 0) true;
+
+  struct timespec now;
+  timespec_get(&now, TIME_UTC);
+  return_if_not (timeout_reached(
+    now.tv_sec, now.tv_nsec,
+    self->last_sent.tv_sec, self->last_sent.tv_nsec,
+    self->timeout / 1000, (self->timeout % 1000) * 1000000l)) false;
+
+  self->last_sent.tv_sec = 0;
+  self->state = LeelenDialogState_nak(self->state);
+  return true;
 }
 
 
@@ -121,6 +120,7 @@ int LeelenDialog_sendmsg (
   if (code != LEELEN_CODE_OK) {
     self->state = LeelenDialogState_send(self->state, code);
     timespec_get(&self->last_sent, TIME_UTC);
+    self->last_activity = self->last_sent.tv_sec + 1;
   }
   return 0;
 }
@@ -131,7 +131,7 @@ int LeelenDialog_sendcode (
   char buf[LEELEN_MESSAGE_MIN_SIZE];
   struct LeelenMessage message = {
     .id = self->id, .code = code,
-    .from = self->from, .from_type = self->from_type, .to = self->to,
+    .from = self->our, .from_type = self->our_type, .to = self->their,
   };
   int len = LeelenMessage_tostring(&message, buf, sizeof(buf)) + 1;
   return LeelenDialog_sendmsg(self, buf, len, sockfd);
@@ -140,8 +140,8 @@ int LeelenDialog_sendcode (
 
 int LeelenDialog_may_bye (struct LeelenDialog *self, int sockfd) {
   return_if_fail (self->id != 0) 1;
-  return_if_fail (self->state == LEELEN_DIALOG_DISCONNECTED ||
-                  self->state == LEELEN_DIALOG_DISCONNECTING) 1;
+  return_if (self->state == LEELEN_DIALOG_DISCONNECTED ||
+             self->state == LEELEN_DIALOG_DISCONNECTING) 1;
   return LeelenDialog_sendcode(self, LEELEN_CODE_BYE, sockfd);
 }
 
@@ -154,18 +154,21 @@ int LeelenDialog_ack (struct LeelenDialog *self, int sockfd) {
 int LeelenDialog_send (
     struct LeelenDialog *self, unsigned int code, int sockfd,
     char * const *audio_formats, char * const *video_formats) {
+  return_if_fail (self->id != 0) 255;
+  return_if_fail (self->mtu >= LEELEN_MESSAGE_MIN_SIZE) 255;
+
   char buf[self->mtu];
   struct LeelenMessage message = {
     .id = self->id, .code = code,
-    .from = self->from, .from_type = self->from_type, .to = self->to,
+    .from = self->our, .from_type = self->our_type, .to = self->their,
     .audio_formats = (char **) audio_formats,
     .video_formats = (char **) video_formats,
     .audio_port = self->our_audio_port, .video_port = self->our_video_port,
   };
   unsigned int len = LeelenMessage_tostring(&message, buf, sizeof(buf)) + 1;
   should (len <= sizeof(buf)) otherwise {
-    LOG(LOG_LEVEL_WARNING, "Message too long, want %d bytes, got %ld bytes",
-        len + 1, sizeof(buf));
+    LOG(LOG_LEVEL_WARNING, "Message too long, would be %d bytes, "
+        "but only capable of hodling %ld bytes", len + 1, sizeof(buf));
     len = sizeof(buf);
     buf[len - 1] = '\0';
   }
@@ -180,72 +183,93 @@ int LeelenDialog_receive (
 
   enum LeelenCode code = le32toh(LEELEN_MESSAGE_CODE(msg));
   if (code == LEELEN_CODE_OK) {
-    return_if_fail (!LeelenDialog_check_timeout(self)) 254;
+    return_if_fail (!LeelenDialog_ack_timeout(self)) 254;
     self->state = LeelenDialogState_ack(self->state);
-    if (audio_formats != NULL) {
-      *audio_formats = NULL;
-    };
-    if (video_formats != NULL) {
-      *video_formats = NULL;
-    };
-    return 0;
+    // special case: handle ACK quickly
+    // note that also means that we do not parse (and save) fields from SDP
+    if (audio_formats == NULL && video_formats == NULL) {
+      self->last_activity = time(NULL);
+      return 0;
+    }
   }
 
   // parse sdp
   struct LeelenMessage message;
   return_nonzero (LeelenMessage_init(
-    &message, msg, audio_formats != NULL, video_formats != NULL));
+    &message, msg, audio_formats == NULL, video_formats == NULL));
 
   // verify
-  should (strcmp(self->to.str, message.from.str) == 0) otherwise {
-    LOG(LOG_LEVEL_INFO, "Expect their number %s, got %s",
-        self->to.str, message.from.str);
-    self->to = message.from;
-  }
-  if (self->to_type == 0) {
-    self->to_type = message.from_type;
+  if unlikely (message.from.str[0] == '\0') {
+    LOG(LOG_LEVEL_INFO, "No from phone number in message");
   } else {
-    should (self->to_type == message.from_type) otherwise {
-      LOG(LOG_LEVEL_INFO, "Expect their device type %d, got %d",
-          self->to_type, message.from_type);
-      self->to_type = message.from_type;
+    if (self->their.str[0] == '\0') {
+      self->their = message.from;
+    } else {
+      should (strcmp(self->their.str, message.from.str) == 0) otherwise {
+        LOG(LOG_LEVEL_INFO, "Expect their number %s, got %s",
+            self->their.str, message.from.str);
+        self->their = message.from;
+      }
     }
   }
-  should (strcmp(self->from.str, message.to.str) == 0) otherwise {
-    LOG(LOG_LEVEL_INFO, "Expect our number %s, got %s",
-        self->from.str, message.to.str);
-    // do not change self->from
-  }
-  if (self->their_audio_port == 0) {
-    self->their_audio_port = message.audio_port;
+  if unlikely (message.from_type == 0) {
+    LOG(LOG_LEVEL_INFO, "No device type in message");
   } else {
-    should (self->their_audio_port == message.audio_port) otherwise {
-      LOG(LOG_LEVEL_INFO, "Expect audio port %d, got %d",
-          self->their_audio_port, message.audio_port);
+    if (self->their_type == 0) {
+      self->their_type = message.from_type;
+    } else {
+      should (self->their_type == message.from_type) otherwise {
+        LOG(LOG_LEVEL_INFO, "Expect their device type %d, got %d",
+            self->their_type, message.from_type);
+        self->their_type = message.from_type;
+      }
+    }
+  }
+  if unlikely (message.to.str[0] == '\0') {
+    LOG(LOG_LEVEL_INFO, "No to phone number in message");
+  } else {
+    should (strcmp(self->our.str, message.to.str) == 0) otherwise {
+      LOG(LOG_LEVEL_INFO, "Expect our number %s, got %s",
+          self->our.str, message.to.str);
+      // do not change self->our
+    }
+  }
+  if (message.audio_port != 0) {
+    if (self->their_audio_port == 0) {
       self->their_audio_port = message.audio_port;
+    } else {
+      should (self->their_audio_port == message.audio_port) otherwise {
+        LOG(LOG_LEVEL_INFO, "Expect audio port %d, got %d",
+            self->their_audio_port, message.audio_port);
+        self->their_audio_port = message.audio_port;
+      }
     }
   }
-  if (self->their_video_port == 0) {
-    self->their_video_port = message.video_port;
-  } else {
-    should (self->their_video_port == message.video_port) otherwise {
-      LOG(LOG_LEVEL_INFO, "Expect video port %d, got %d",
-          self->their_video_port, message.video_port);
+  if (message.video_port != 0) {
+    if (self->their_video_port == 0) {
       self->their_video_port = message.video_port;
+    } else {
+      should (self->their_video_port == message.video_port) otherwise {
+        LOG(LOG_LEVEL_INFO, "Expect video port %d, got %d",
+            self->their_video_port, message.video_port);
+        self->their_video_port = message.video_port;
+      }
     }
   }
 
-  // ack
-  int ret = LeelenDialog_sendcode(self, LEELEN_CODE_OK, sockfd);
-  should (ret == 0) otherwise {
-    int saved_errno = errno;
-    LeelenMessage_destroy(&message);
-    errno = saved_errno;
-    return ret;
-  }
+  if (code != LEELEN_CODE_OK) {
+    // ack
+    int ret = LeelenDialog_sendcode(self, LEELEN_CODE_OK, sockfd);
+    should (ret == 0) otherwise {
+      int saved_errno = errno;
+      LeelenMessage_destroy(&message);
+      errno = saved_errno;
+      return ret;
+    }
 
-  // update state
-  self->state = LeelenDialogState_receive(self->state, code);
+    // update state
+    self->state = LeelenDialogState_receive(self->state, code);
+  }
 
   // return
   if (audio_formats != NULL) {
@@ -254,27 +278,31 @@ int LeelenDialog_receive (
   if (video_formats != NULL) {
     *video_formats = message.video_formats;
   }
+  self->last_activity = time(NULL);
   return 0;
 }
 
 
 int LeelenDialog_init (
     struct LeelenDialog *self, const struct LeelenConfig *config,
-    const struct sockaddr *theirs, const struct LeelenNumber *to,
+    const struct sockaddr *theirs, const struct LeelenNumber *their,
     leelen_id_t id) {
   self->id = id;
   while unlikely (self->id == 0) {
     self->id = rand();
   }
 
-  self->from = config->number;
-  self->from_type = config->type;
-  if unlikely (to == NULL) {
-    self->to.str[0] = '\0';
+  self->our = config->number;
+  self->our_type = config->type;
+  if unlikely (their == NULL) {
+    self->their.str[0] = '\0';
   } else {
-    self->to = *to;
+    self->their = *their;
   }
-  self->to_type = LEELEN_DEVICE_UNKNOWN;
+  self->their_type = LEELEN_DEVICE_UNKNOWN;
+
+  self->timeout = config->voip_timeout;
+  self->duration = config->duration;
 
   self->ours = config->addr;
   self->theirs = *(union sockaddr_in46 *) theirs;

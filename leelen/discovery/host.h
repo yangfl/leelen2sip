@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
-#include <sys/types.h>
+#include <netinet/in.h>
 
 #include <inet46i/in46.h>
 

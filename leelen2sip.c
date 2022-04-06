@@ -54,7 +54,7 @@ static void shutdown_leelen2sip (int sig) {
 static int start_leelen2sip (
     struct SIPLeelen *sip, bool daemonize) {
   union sockaddr_in46 *sip_addr = &sip->addr;
-  struct LeelenDiscovery *device = &sip->device;
+  struct LeelenDiscovery *device = &sip->leelen;
   const struct LeelenConfig *config = device->config;
 
   // check ports
@@ -86,6 +86,7 @@ static int start_leelen2sip (
   }
 
   // open sockets
+  LeelenDiscovery_sync(&sip->leelen);
   int res = SIPLeelen_connect(sip);
   should (res == 0) otherwise {
     int port;
@@ -119,7 +120,7 @@ static int start_leelen2sip (
 
   // set up LEELEN discovery
   if likely (device->report_addr[0] == '\0') {
-    LeelenAdvertiser_fix_report_addr((struct LeelenAdvertiser *) device);
+    LeelenAdvertiser_sync((struct LeelenAdvertiser *) device);
   }
   LOG(LOG_LEVEL_INFO, "Phone number: %s", config->number.str);
   LOG(LOG_LEVEL_INFO, "Device desc: " LEELEN_DISCOVERY_FORMAT,
@@ -224,7 +225,7 @@ int main (int argc, char *argv[]) {
   }
   union sockaddr_in46 *sip_addr = &sip.addr;
   sip_addr->sa_family = AF_UNSPEC;
-  struct LeelenDiscovery *device = &sip.device;
+  struct LeelenDiscovery *device = &sip.leelen;
 
   // parse options
   static const struct option long_options[] = {
@@ -254,6 +255,9 @@ int main (int argc, char *argv[]) {
   };
 
   int n_positional = 0;
+  bool discovery_listen_set = false;
+  bool voip_listen_set = false;
+  bool control_listen_set = false;
   while (1) {
     int longindex;
     int index = getopt_long(argc, argv, "-i:p:Dd6h", long_options, &longindex);
@@ -376,20 +380,32 @@ int main (int argc, char *argv[]) {
               break;
             case 516:
               config.discovery = port;
-              // fall through
+              if (!discovery_listen_set) {
+                config.discovery_src = port;
+              }
+              break;
             case 519:
+              discovery_listen_set = true;
               config.discovery_src = port;
               break;
             case 517:
               config.voip = port;
-              // fall through
+              if (!voip_listen_set) {
+                config.voip_src = port;
+              }
+              break;
             case 520:
+              voip_listen_set = true;
               config.voip_src = port;
               break;
             case 518:
               config.control = port;
-              // fall through
+              if (!control_listen_set) {
+                config.control_src = port;
+              }
+              break;
             case 521:
+              control_listen_set = true;
               config.control_src = port;
               break;
           }

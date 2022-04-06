@@ -163,7 +163,7 @@ int socketpbr_set (
   }
 
   if (pbr->dst_required) {
-    int enabled = 1;
+    const int enabled = 1;
     return_nonzero (setsockopt(
       sockfd, af == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
       af == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO,

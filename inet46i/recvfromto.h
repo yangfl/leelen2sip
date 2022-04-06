@@ -5,9 +5,12 @@
 extern "C" {
 #endif
 
+// #include <netinet/in.h>
+struct in_addr;
 #include <sys/socket.h>
 
-#include "sockaddr46.h"
+// #include "sockaddr46.h"
+union sockaddr_in46;
 
 /**
  * @file

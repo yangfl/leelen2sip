@@ -20,7 +20,6 @@ __attribute__((nonnull, access(write_only, 1, 2)))
  * @return 0 on success, error otherwise.
  */
 int threadname_get (char *buf, int size);
-
 __attribute__((nonnull, access(read_only, 1)))
 /**
  * @brief Set current thread name.
@@ -29,7 +28,6 @@ __attribute__((nonnull, access(read_only, 1)))
  * @return 0 on success, error otherwise.
  */
 int threadname_set (const char *name);
-
 __attribute__((nonnull, access(read_only, 1)))
 /**
  * @brief Set current thread name.
@@ -39,7 +37,6 @@ __attribute__((nonnull, access(read_only, 1)))
  * @return 0 on success, error otherwise.
  */
 int threadname_format (const char *format, ...);
-
 __attribute__((nonnull, access(read_only, 1), format(printf, 1, 2)))
 /**
  * @brief Append string to current thread name.
@@ -49,7 +46,6 @@ __attribute__((nonnull, access(read_only, 1), format(printf, 1, 2)))
  * @return 0 on success, error otherwise.
  */
 int threadname_append (const char *format, ...);
-
 
 
 #ifdef __cplusplus

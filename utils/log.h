@@ -880,8 +880,7 @@ int Logger_log_func (
     int res = LoggerEvent_init_func( \
       &__logger_event, self, level, file, line, func); \
     LOGGER_EVENT_GUARD_BEGIN(&__logger_event); \
-    res += LoggerEvent_log_func(&__logger_event, __VA_ARGS__); \
-    LOGGER_EVENT_GUARD_END(&__logger_event); \
+    res += dprintf(__logger_event.stream->fd, __VA_ARGS__); \
     res += LoggerEvent_destroy_inline(&__logger_event); \
     LOGGER_EVENT_GUARD_END(&__logger_event); \
     res; \
@@ -957,7 +956,7 @@ int Logger_log_perror_func (
     int res = LoggerEvent_init_func( \
       &__logger_event, self, level, file, line, func); \
     LOGGER_EVENT_GUARD_BEGIN(&__logger_event); \
-    res += LoggerEvent_log_func(&__logger_event, __VA_ARGS__); \
+    res += dprintf(__logger_event.stream->fd, __VA_ARGS__); \
     res += LoggerEvent_perror_func(&__logger_event, errnum, true); \
     LOGGER_EVENT_GUARD_END(&__logger_event); \
     res += LoggerEvent_destroy_inline(&__logger_event); \

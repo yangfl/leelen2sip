@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <netinet/in.h>
 #include <sys/time.h>  // osip
 
 #include <osip2/osip.h>
@@ -19,24 +20,24 @@ struct SIPLeelen;
 
 /**
  * @ingroup sip
- * @brief Auxiliary structure for osip_dialog_t.
+ * @brief Auxiliary structure for osip_transaction_t.
  * @note osip_transaction::your_instance stores SIPLeelen.
  */
 struct SIPTransactionData {
-  /// if not @c NULL, free this session after transaction ends
+  /// session associated with this transaction
   struct SIPLeelenSession *session;
-  /// address family of osip_dialog_t::out_socket
+  /// address family of osip_transaction_t::out_socket
   unsigned char out_af;
 };
 
-_Static_assert(sizeof(struct SIPTransactionData) <= 6 * 4,
+_Static_assert(sizeof(struct SIPTransactionData) <= sizeof(void *) + 5 * 4,
                "SIPTransactionData cannot fit into reversed zone");
 
 /**
  * @memberof SIPTransactionData
- * @brief Get SIPTransactionData attribute in osip_dialog_t.
+ * @brief Get SIPTransactionData attribute in osip_transaction_t.
  *
- * @param tr osip_dialog_t object.
+ * @param tr Transaction.
  * @param name SIPTransactionData member name.
  * @return SIPTransactionData attribute.
  */
@@ -44,6 +45,19 @@ _Static_assert(sizeof(struct SIPTransactionData) <= 6 * 4,
   ((struct SIPTransactionData *) (&(tr)->reserved1))->name
 
 
+__attribute__((nonnull(1, 2), access(read_only, 2), access(read_only, 4)))
+/**
+ * @relates SIPTransactionData
+ * @brief Get audio and video description from SDP in request.
+ *
+ * @param sdp OSIP SDP.
+ * @param media Media type.
+ * @param port Port number.
+ * @param formats Array of formats.
+ * @return 0 on success, -1 if out of memory.
+ */
+int _SIPLeelen_encode_media_formats (
+  sdp_message_t *sdp, const char *media, in_port_t port, char * const *formats);
 __attribute__((nonnull(1), access(write_only, 2), access(write_only, 3)))
 /**
  * @relates SIPTransactionData
@@ -56,17 +70,6 @@ __attribute__((nonnull(1), access(write_only, 2), access(write_only, 3)))
  */
 int _SIPLeelen_extract_media_formats (
   osip_message_t *request, char ***audio_formats, char ***video_formats);
-
-__attribute__((nonnull))
-/**
- * @relates SIPTransactionData
- * @brief Callback called when a SIP transaction is created.
- *
- * @param type Transaction type.
- * @param tr Transaction.
- * @return 0 on success, error otherwise.
- */
-int _SIPLeelen_init_transaction (int type, osip_transaction_t *tr);
 
 __attribute__((nonnull))
 /**
